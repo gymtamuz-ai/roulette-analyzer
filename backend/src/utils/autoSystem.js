@@ -1,0 +1,158 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// MOTOR DE DECISIÓN AUTOMÁTICO — Backend (CommonJS)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const { computeMirrorState }                             = require('./mirror');
+const { computeJacoboState, evaluateJacoboOpportunity }  = require('./jacobo');
+const { computeBettingState }                            = require('./betting');
+
+const MIN_SCORE_TO_BET   = 30;
+const SECTOR_EVAL_WINDOW = 30;
+const JACOBO_EVAL_WINDOW = 30;
+const MIRROR_WIN         = 10;
+const SYSTEM_PRIORITY    = { ESPEJO: 3, SECTORES: 2, JACOBO: 1 };
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function valueForMode(spin, mode) {
+  if (mode === 'color')  { const c = spin.color;  return (c && c !== 'green') ? c : null; }
+  if (mode === 'parity') { const p = spin.parity; return (p && p !== 'zero')  ? p : null; }
+  if (mode === 'range')  { if (spin.number === 0) return null; return spin.number <= 18 ? 'low' : 'high'; }
+  return null;
+}
+
+function computeStreakForMode(spins, mode) {
+  let streakValue = null, streak = 0;
+  for (let i = spins.length - 1; i >= 0; i--) {
+    const v = valueForMode(spins[i], mode);
+    if (v === null) continue;
+    if (streakValue === null)   { streakValue = v; streak = 1; }
+    else if (v === streakValue) { streak++; }
+    else                        { break; }
+  }
+  return Math.max(0, streak - 1);
+}
+
+function isNoisyForMode(spins, mode) {
+  const vals = spins.slice(-MIRROR_WIN).map(s => valueForMode(s, mode)).filter(v => v !== null);
+  if (vals.length < 4) return false;
+  let alt = 0;
+  for (let i = 1; i < vals.length; i++) if (vals[i] !== vals[i - 1]) alt++;
+  return (alt / (vals.length - 1)) > 0.70;
+}
+
+// ─── A) Score Espejo ──────────────────────────────────────────────────────────
+function scoreMirrorSystem(spins) {
+  if (spins.length < MIRROR_WIN) return { score: 0, mode: null, streak: 0 };
+  let best = { score: -Infinity, mode: null, streak: 0 };
+  for (const mode of ['color', 'parity', 'range']) {
+    const streak = computeStreakForMode(spins, mode);
+    const noisy  = isNoisyForMode(spins, mode);
+    let score = 0;
+    if (streak >= 4)       score += 40;
+    else if (streak === 3) score += 25;
+    if (noisy)             score -= 20;
+    if (score > best.score) best = { score, mode, streak };
+  }
+  return { score: Math.max(0, best.score), mode: best.mode, streak: best.streak };
+}
+
+// ─── B) Score Sectores ────────────────────────────────────────────────────────
+function scoreSectorsSystem(spins) {
+  const recent = spins.slice(-SECTOR_EVAL_WINDOW).filter(s => s.number !== 0);
+  if (recent.length < 10) return { score: 0, diff: 0 };
+  const a3 = [0, 0, 0], a4 = [0, 0, 0, 0];
+  for (const s of recent) {
+    if (s.sector_a3 >= 1 && s.sector_a3 <= 3) a3[s.sector_a3 - 1]++;
+    if (s.sector_a4 >= 1 && s.sector_a4 <= 4) a4[s.sector_a4 - 1]++;
+  }
+  const a3diff   = Math.max(...a3) - Math.min(...a3);
+  const a4diff   = Math.max(...a4) - Math.min(...a4);
+  const bestDiff = Math.max(a3diff, a4diff);
+  let score = 0;
+  if (bestDiff > 8)      score += 40;
+  else if (bestDiff > 5) score += 25;
+  if (bestDiff <= 2)     score -= 15;
+  return { score: Math.max(0, score), diff: bestDiff };
+}
+
+// ─── C) Score Jacobo ──────────────────────────────────────────────────────────
+function scoreJacoboSystem(spins) {
+  if (spins.length < 20) return { score: 0 };
+  const recent = spins.slice(-JACOBO_EVAL_WINDOW);
+  const numCounts = {};
+  for (const s of recent) numCounts[s.number] = (numCounts[s.number] || 0) + 1;
+  const counts     = Object.values(numCounts);
+  const maxCount   = Math.max(...counts);
+  const uniqueNums = counts.length;
+  let score = 0;
+  if (uniqueNums >= 20)      score += 30;
+  else if (uniqueNums >= 15) score += 15;
+  if (maxCount <= 3)      score += 20;
+  else if (maxCount >= 6) score -= 25;
+  const opp = evaluateJacoboOpportunity(spins);
+  if (opp.shouldActivate) score += 10;
+  return { score };
+}
+
+// ─── Risk penalty ─────────────────────────────────────────────────────────────
+function getRiskPenalty(state) {
+  if (!state) return 0;
+  if (state.status === 'BLOCKED') return -30;
+  if ((state.cyclesAborted || 0) >= 2 && (state.cyclesAborted || 0) > (state.cyclesCompleted || 0)) return -30;
+  return 0;
+}
+
+// ─── Motor principal ──────────────────────────────────────────────────────────
+function computeBestSystem(spins, passTarget = 2, systemOverride = null) {
+  if (!spins || spins.length === 0) return { system: null, mirrorMode: null };
+
+  // Computar estados
+  const mirrorStates = {
+    color:  computeMirrorState(spins, 'color'),
+    parity: computeMirrorState(spins, 'parity'),
+    range:  computeMirrorState(spins, 'range'),
+  };
+  const jacoboState  = computeJacoboState(spins);
+  const bettingState = computeBettingState(spins, systemOverride, parseInt(passTarget));
+
+  // Lock: ciclo activo en progreso → mantener sistema
+  for (const [mode, mState] of Object.entries(mirrorStates)) {
+    if (mState.isActive) return { system: 'ESPEJO',   mirrorMode: mode };
+  }
+  if (jacoboState.isActive) return { system: 'JACOBO',   mirrorMode: null };
+  if (bettingState?.active) return { system: 'SECTORES', mirrorMode: null };
+
+  // Scoring
+  const mScore = scoreMirrorSystem(spins);
+  const sScore = scoreSectorsSystem(spins);
+  const jScore = scoreJacoboSystem(spins);
+
+  const bestMirrorState = Object.values(mirrorStates)
+    .sort((a, b) =>
+      ((b.cyclesCompleted || 0) + (b.cyclesAborted || 0)) -
+      ((a.cyclesCompleted || 0) + (a.cyclesAborted || 0))
+    )[0];
+
+  const mAdj = mScore.score + getRiskPenalty(bestMirrorState);
+  const sAdj = sScore.score + (
+    (bettingState?.cyclesAborted >= 2 &&
+     bettingState?.cyclesAborted > (bettingState?.cyclesCompleted || 0)) ? -30 : 0
+  );
+  const jAdj = jScore.score + getRiskPenalty(jacoboState);
+
+  const candidates = [
+    { system: 'ESPEJO',   score: mAdj, mirrorMode: mScore.mode },
+    { system: 'SECTORES', score: sAdj, mirrorMode: null },
+    { system: 'JACOBO',   score: jAdj, mirrorMode: null },
+  ].filter(c => c.score >= MIN_SCORE_TO_BET);
+
+  if (candidates.length === 0) return { system: null, mirrorMode: null };
+
+  candidates.sort((a, b) =>
+    b.score - a.score || SYSTEM_PRIORITY[b.system] - SYSTEM_PRIORITY[a.system]
+  );
+
+  return { system: candidates[0].system, mirrorMode: candidates[0].mirrorMode };
+}
+
+module.exports = { computeBestSystem };

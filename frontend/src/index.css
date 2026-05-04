@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-950 text-white;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-600 rounded;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-gray-900 border border-gray-800 rounded-xl p-4;
+  }
+  .card-title {
+    @apply text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold;
+  }
+  .btn {
+    @apply px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 active:scale-95;
+  }
+  .btn-primary {
+    @apply btn bg-blue-600 hover:bg-blue-500 text-white;
+  }
+  .btn-ghost {
+    @apply btn bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white;
+  }
+  .btn-danger {
+    @apply btn bg-red-800 hover:bg-red-700 text-white;
+  }
+}
+
+@layer utilities {
+  .pulse-once {
+    animation: pulse-once 0.4s ease-out;
+  }
+  @keyframes pulse-once {
+    0% { transform: scale(1.15); opacity: 0.7; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .glow-green {
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+  }
+  .glow-red {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+  }
+}
