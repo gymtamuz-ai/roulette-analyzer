@@ -1,21 +1,19 @@
 const path = require('path');
 const { Pool } = require('pg');
 
-// Load .env if present (local dev); in production env vars are set by the platform
-require('dotenv').config({
-  path: path.resolve(__dirname, '../../.env'),
-});
+// Load .env for local dev (ignored if file doesn't exist)
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 // ── Connection pool ───────────────────────────────────────────────────────────
-// Railway / Render / Heroku provide a single DATABASE_URL connection string.
-// Local dev uses individual DB_* variables.
+// Railway / Render provide DATABASE_URL automatically when a Postgres plugin is added.
+// Local dev falls back to individual DB_* vars.
 const pool = process.env.DATABASE_URL
   ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }, // required for Railway/Render managed Postgres
-      max: 10,
+      connectionString:        process.env.DATABASE_URL,
+      ssl:                     { rejectUnauthorized: false },
+      max:                     10,
       idleTimeoutMillis:       30_000,
-      connectionTimeoutMillis:  5_000,
+      connectionTimeoutMillis:  3_000, // fail fast so healthcheck doesn't hang
     })
   : new Pool({
       host:     process.env.DB_HOST     || '127.0.0.1',
@@ -23,12 +21,13 @@ const pool = process.env.DATABASE_URL
       database: process.env.DB_NAME     || 'roulette_analyzer',
       user:     process.env.DB_USER     || 'postgres',
       password: process.env.DB_PASSWORD ?? '',
-      max: 10,
+      max:                     10,
       idleTimeoutMillis:       30_000,
-      connectionTimeoutMillis:  5_000,
+      connectionTimeoutMillis:  3_000,
     });
 
 pool.on('error', (err) => {
+  // Log but don't crash — the server stays up even if DB drops temporarily
   console.error('❌ PostgreSQL pool error:', err.message);
 });
 
