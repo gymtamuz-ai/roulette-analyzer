@@ -1,50 +1,63 @@
-// In production: VITE_API_URL=https://my-backend.railway.app/api
-// In dev: unset → Vite proxy forwards /api → localhost:3001/api
+// ── Base URL ──────────────────────────────────────────────────────────────────
+// VITE_API_URL is injected at BUILD TIME by Vite from the platform env vars.
+// Vercel: set VITE_API_URL=https://your-app.up.railway.app/api in project settings.
+// Local dev: leave unset → Vite proxy forwards /api/* to localhost:3001.
 const BASE = import.meta.env.VITE_API_URL || '/api';
 
-async function req(method, path, body) {
+// ── Core fetch wrapper ────────────────────────────────────────────────────────
+export async function apiFetch(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    ...options,
   });
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
+    const text = await res.text();
+    throw new Error(text);
   }
+
   return res.json();
 }
 
+// ── Convenience helpers ───────────────────────────────────────────────────────
+const get  = (path)       => apiFetch(path);
+const post = (path, body) => apiFetch(path, { method: 'POST',   body: JSON.stringify(body) });
+const put  = (path, body) => apiFetch(path, { method: 'PUT',    body: JSON.stringify(body) });
+const del  = (path)       => apiFetch(path, { method: 'DELETE' });
+
+// ── API methods ───────────────────────────────────────────────────────────────
 export const api = {
   // Tables
-  getTables: () => req('GET', '/tables'),
-  createTable: (data) => req('POST', '/tables', data),
-  deleteTable: (id) => req('DELETE', `/tables/${id}`),
+  getTables:     ()                => get('/tables'),
+  createTable:   (data)            => post('/tables', data),
+  deleteTable:   (id)              => del(`/tables/${id}`),
 
   // Sessions
-  getSessions: (tableId) => req('GET', `/sessions?tableId=${tableId}`),
-  createSession: (tableId, name) => req('POST', '/sessions', { tableId, name }),
-  endSession: (id) => req('PUT', `/sessions/${id}/end`),
-  deleteSession: (id) => req('DELETE', `/sessions/${id}`),
+  getSessions:   (tableId)         => get(`/sessions?tableId=${tableId}`),
+  createSession: (tableId, name)   => post('/sessions', { tableId, name }),
+  endSession:    (id)              => put(`/sessions/${id}/end`),
+  deleteSession: (id)              => del(`/sessions/${id}`),
 
-  // Spins — always fetch all (up to 10000) for full persistence
-  getSpins: (sessionId) => req('GET', `/spins?sessionId=${sessionId}&limit=10000`),
-  addSpin: (sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color') =>
-    req('POST', '/spins', { sessionId, number, passTarget, systemType, bettingMode, mirrorMode }),
-  deleteLast: (sessionId) => req('DELETE', `/spins/last?sessionId=${sessionId}`),
-  bulkSpins: (sessionId, numbers, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color') =>
-    req('POST', '/spins/bulk', { sessionId, numbers, passTarget, systemType, bettingMode, mirrorMode }),
+  // Spins
+  getSpins:      (sessionId)       => get(`/spins?sessionId=${sessionId}&limit=10000`),
+  addSpin:       (sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color') =>
+    post('/spins', { sessionId, number, passTarget, systemType, bettingMode, mirrorMode }),
+  deleteLast:    (sessionId)       => del(`/spins/last?sessionId=${sessionId}`),
+  bulkSpins:     (sessionId, numbers, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color') =>
+    post('/spins/bulk', { sessionId, numbers, passTarget, systemType, bettingMode, mirrorMode }),
 
-  // Results & performance
-  getResults: (sessionId) => req('GET', `/results/session/${sessionId}`),
-  getResultsSummary: (sessionId) => req('GET', `/results/session/${sessionId}/summary`),
+  // Results
+  getResults:        (sessionId)              => get(`/results/session/${sessionId}`),
+  getResultsSummary: (sessionId)              => get(`/results/session/${sessionId}/summary`),
 
   // Analysis
   getAnalysis: (sessionId, systemType, passTarget) => {
     let url = `/analysis/session/${sessionId}?passTarget=${passTarget}`;
     if (systemType) url += `&systemType=${systemType}`;
-    return req('GET', url);
+    return get(url);
   },
-  getBias: (tableId) => req('GET', `/analysis/bias/${tableId}`),
-  exportCSV: (sessionId) => `${BASE}/analysis/export/${sessionId}`
+  getBias:     (tableId)  => get(`/analysis/bias/${tableId}`),
+  exportCSV:   (sessionId) => `${BASE}/analysis/export/${sessionId}`,
 };
