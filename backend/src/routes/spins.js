@@ -6,6 +6,7 @@ const { computeBettingState, calculateBetResult }      = require('../utils/betti
 const { computeJacoboState, calculateJacoboBetResult } = require('../utils/jacobo');
 const { computeMirrorState, calculateMirrorBetResult } = require('../utils/mirror');
 const { computeBestSystem }                            = require('../utils/autoSystem');
+const { computeHotNumbers }                            = require('../utils/hotNumbers');
 
 // ─── Compute bet result for any mode ──────────────────────────────────────────
 function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color') {
@@ -126,6 +127,24 @@ router.post('/', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    // ── Hot window snapshot — every 36th spin in the session ────────────────
+    // spinOrder is 0-based index of the new spin; total spins = spinOrder + 1
+    const totalSpins = spinOrder + 1;
+    if (totalSpins % 36 === 0) {
+      try {
+        const windowIndex = totalSpins / 36;
+        const last36nums  = [...previousSpins.slice(-35).map(s => s.number), n];
+        const hot         = computeHotNumbers(last36nums);
+        await pool.query(
+          `INSERT INTO hot_windows (table_id, session_id, window_index, numbers)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT DO NOTHING`,
+          [tableId, sessionId, windowIndex, JSON.stringify(hot)]
+        );
+      } catch (_) { /* non-fatal — don't break the response */ }
+    }
+
     res.status(201).json({ ...newSpin, bet_result: betResult });
   } catch (err) {
     await client.query('ROLLBACK');

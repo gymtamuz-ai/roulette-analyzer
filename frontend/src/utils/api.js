@@ -52,6 +52,9 @@ export const api = {
   getResults:        (sessionId)              => get(`/results/session/${sessionId}`),
   getResultsSummary: (sessionId)              => get(`/results/session/${sessionId}/summary`),
 
+  // Hot Windows
+  getHotWindows: (tableId) => get(`/hot-windows/${tableId}`),
+
   // Analysis
   getAnalysis: (sessionId, systemType, passTarget) => {
     let url = `/analysis/session/${sessionId}?passTarget=${passTarget}`;

@@ -54,6 +54,19 @@ CREATE INDEX IF NOT EXISTS idx_spins_order ON spins(session_id, spin_order);
 CREATE INDEX IF NOT EXISTS idx_results_session ON session_results(session_id);
 CREATE INDEX IF NOT EXISTS idx_results_spin ON session_results(spin_id);
 
+-- ─── Hot Windows ─────────────────────────────────────────────────────────────
+-- Stores top-frequency numbers for every completed 36-spin block.
+CREATE TABLE IF NOT EXISTS hot_windows (
+  id           SERIAL PRIMARY KEY,
+  table_id     INTEGER REFERENCES tables(id) ON DELETE CASCADE,
+  session_id   INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+  window_index INTEGER NOT NULL,        -- 1-based block number within the session
+  numbers      JSONB   NOT NULL,        -- [{ num, count }, ...]
+  created_at   TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hot_windows_table   ON hot_windows(table_id);
+CREATE INDEX IF NOT EXISTS idx_hot_windows_session ON hot_windows(session_id);
+
 -- ─── Migrations (idempotent) ───────────────────────────────────────────────────
 DO $$ BEGIN
   ALTER TABLE session_results ALTER COLUMN system_type TYPE VARCHAR(20);

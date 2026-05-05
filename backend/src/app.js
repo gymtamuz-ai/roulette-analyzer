@@ -36,11 +36,12 @@ app.use((req, res, next) => {
 });
 
 // ── API routes ────────────────────────────────────────────────────────────────
-app.use('/api/tables',   require('./routes/tables'));
-app.use('/api/sessions', require('./routes/sessions'));
-app.use('/api/spins',    require('./routes/spins'));
-app.use('/api/analysis', require('./routes/analysis'));
-app.use('/api/results',  require('./routes/results'));
+app.use('/api/tables',      require('./routes/tables'));
+app.use('/api/sessions',    require('./routes/sessions'));
+app.use('/api/spins',       require('./routes/spins'));
+app.use('/api/analysis',    require('./routes/analysis'));
+app.use('/api/results',     require('./routes/results'));
+app.use('/api/hot-windows', require('./routes/hotWindows'));
 
 // ── /api/health — always 200; DB status in the body only ─────────────────────
 app.get('/api/health', async (req, res) => {

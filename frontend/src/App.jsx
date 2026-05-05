@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { api } from './utils/api';
 import {
   classifyNumber, calculateFrequencies, calculateAllDelays,
@@ -7,6 +7,7 @@ import {
 import { computeJacoboState } from './utils/jacobo';
 import { computeMirrorState } from './utils/mirror';
 import { computeBestSystem }  from './utils/autoSystem';
+import { getHotNumbers }       from './utils/hotNumbers';
 
 import NumberPad from './components/NumberPad';
 import SpinHistory from './components/SpinHistory';
@@ -17,6 +18,7 @@ import DelayPanel from './components/DelayPanel';
 import BiasPanel from './components/BiasPanel';
 import SessionManager from './components/SessionManager';
 import PerformancePanel from './components/PerformancePanel';
+import HotNumbersPanel from './components/HotNumbersPanel';
 
 // ─── localStorage keys ────────────────────────────────────────────────────────
 const LS_SESSION      = 'roulette_session';
@@ -64,6 +66,7 @@ export default function App() {
   const bettingState   = computeBettingState(spins, systemOverride, passTarget);
   const jacoboState    = computeJacoboState(spins);
   const autoSystemState = computeBestSystem(spins, passTarget, systemOverride);
+  const hotNumbers      = useMemo(() => getHotNumbers(spins), [spins]);
 
   // In auto mode, use the auto-chosen mirror mode; otherwise user-chosen
   const effectiveMirrorMode = (bettingMode === 'auto' && autoSystemState?.mirrorMode)
@@ -329,6 +332,11 @@ export default function App() {
             allDelays={allDelays}
             maxDelays={maxDelays}
             totalSpins={spins.length}
+          />
+          <HotNumbersPanel
+            hotNumbers={hotNumbers}
+            spinsCount={spins.length}
+            tableId={table?.id}
           />
         </div>
       </main>
