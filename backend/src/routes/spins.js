@@ -128,7 +128,7 @@ router.post('/', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // ── Hot window snapshot — every 36th spin in the session ────────────────
+    // ── Hot window + table_memory — every 36th spin in the session ──────────
     // spinOrder is 0-based index of the new spin; total spins = spinOrder + 1
     const totalSpins = spinOrder + 1;
     if (totalSpins % 36 === 0) {
@@ -136,12 +136,30 @@ router.post('/', async (req, res) => {
         const windowIndex = totalSpins / 36;
         const last36nums  = [...previousSpins.slice(-35).map(s => s.number), n];
         const hot         = computeHotNumbers(last36nums);
+
+        // 1. Save the hot_window block
         await pool.query(
           `INSERT INTO hot_windows (table_id, session_id, window_index, numbers)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT DO NOTHING`,
           [tableId, sessionId, windowIndex, JSON.stringify(hot)]
         );
+
+        // 2. Upsert table_memory — incremental, persiste entre sesiones
+        if (hot.length > 0) {
+          const nums   = hot.map(h => h.num);
+          const counts = hot.map(h => h.count);
+          await pool.query(
+            `INSERT INTO table_memory (table_id, number, hits)
+             SELECT $1, num, cnt
+               FROM unnest($2::int[], $3::int[]) AS t(num, cnt)
+             ON CONFLICT (table_id, number)
+             DO UPDATE SET
+               hits       = table_memory.hits + EXCLUDED.hits,
+               updated_at = NOW()`,
+            [tableId, nums, counts]
+          );
+        }
       } catch (_) { /* non-fatal — don't break the response */ }
     }
 

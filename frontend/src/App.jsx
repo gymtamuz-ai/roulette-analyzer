@@ -19,6 +19,7 @@ import BiasPanel from './components/BiasPanel';
 import SessionManager from './components/SessionManager';
 import PerformancePanel from './components/PerformancePanel';
 import HotNumbersPanel from './components/HotNumbersPanel';
+import TableMemoryPanel from './components/TableMemoryPanel';
 
 // ─── localStorage keys ────────────────────────────────────────────────────────
 const LS_SESSION      = 'roulette_session';
@@ -338,6 +339,7 @@ export default function App() {
             spinsCount={spins.length}
             tableId={table?.id}
           />
+          <TableMemoryPanel tableId={table?.id} />
         </div>
       </main>
     </div>

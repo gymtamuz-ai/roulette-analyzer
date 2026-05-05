@@ -53,7 +53,10 @@ export const api = {
   getResultsSummary: (sessionId)              => get(`/results/session/${sessionId}/summary`),
 
   // Hot Windows
-  getHotWindows: (tableId) => get(`/hot-windows/${tableId}`),
+  getHotWindows:  (tableId) => get(`/hot-windows/${tableId}`),
+
+  // Table Memory
+  getTableMemory: (tableId) => get(`/table-memory/${tableId}`),
 
   // Analysis
   getAnalysis: (sessionId, systemType, passTarget) => {

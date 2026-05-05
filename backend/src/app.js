@@ -41,7 +41,8 @@ app.use('/api/sessions',    require('./routes/sessions'));
 app.use('/api/spins',       require('./routes/spins'));
 app.use('/api/analysis',    require('./routes/analysis'));
 app.use('/api/results',     require('./routes/results'));
-app.use('/api/hot-windows', require('./routes/hotWindows'));
+app.use('/api/hot-windows',  require('./routes/hotWindows'));
+app.use('/api/table-memory', require('./routes/tableMemory'));
 
 // ── /api/health — always 200; DB status in the body only ─────────────────────
 app.get('/api/health', async (req, res) => {

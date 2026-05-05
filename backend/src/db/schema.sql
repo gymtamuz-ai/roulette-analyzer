@@ -54,6 +54,18 @@ CREATE INDEX IF NOT EXISTS idx_spins_order ON spins(session_id, spin_order);
 CREATE INDEX IF NOT EXISTS idx_results_session ON session_results(session_id);
 CREATE INDEX IF NOT EXISTS idx_results_spin ON session_results(spin_id);
 
+-- ─── Table Memory — acumulado histórico por mesa ────────────────────────────
+-- Una fila por número por mesa. Se actualiza con cada bloque de 36 spins.
+CREATE TABLE IF NOT EXISTS table_memory (
+  id         SERIAL PRIMARY KEY,
+  table_id   INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+  number     INTEGER NOT NULL CHECK (number >= 0 AND number <= 36),
+  hits       INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(table_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_table_memory_table ON table_memory(table_id);
+
 -- ─── Hot Windows ─────────────────────────────────────────────────────────────
 -- Stores top-frequency numbers for every completed 36-spin block.
 CREATE TABLE IF NOT EXISTS hot_windows (
