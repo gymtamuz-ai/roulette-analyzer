@@ -29,8 +29,8 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
       const state = computeJacoboState(previousSpins);
       return calculateJacoboBetResult(state, newSpinCls.number);
     }
-    // SECTORES
-    const state = computeBettingState(previousSpins, systemType, parseInt(passTarget));
+    // SECTORES — AUTO MODE siempre usa A4, nunca A3
+    const state = computeBettingState(previousSpins, 'A4', parseInt(passTarget));
     return calculateBetResult(state, newSpinCls.sector_a3, newSpinCls.sector_a4);
   }
   // Default: sectors (A3/A4)

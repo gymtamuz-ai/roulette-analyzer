@@ -56,23 +56,22 @@ function scoreMirrorSystem(spins) {
   return { score: Math.max(0, best.score), mode: best.mode, streak: best.streak };
 }
 
-// ─── B) Score Sectores ────────────────────────────────────────────────────────
+// ─── B) Score Sectores A4 ────────────────────────────────────────────────────
+// AUTO MODE usa exclusivamente A4. A3 queda fuera del motor automático.
 function scoreSectorsSystem(spins) {
   const recent = spins.slice(-SECTOR_EVAL_WINDOW).filter(s => s.number !== 0);
-  if (recent.length < 10) return { score: 0, diff: 0 };
-  const a3 = [0, 0, 0], a4 = [0, 0, 0, 0];
+  if (recent.length < 10) return { score: 0, diff: 0, suggestedSystem: 'A4' };
+  // Solo A4 — A3 excluido del motor automático
+  const a4 = [0, 0, 0, 0];
   for (const s of recent) {
-    if (s.sector_a3 >= 1 && s.sector_a3 <= 3) a3[s.sector_a3 - 1]++;
     if (s.sector_a4 >= 1 && s.sector_a4 <= 4) a4[s.sector_a4 - 1]++;
   }
-  const a3diff   = Math.max(...a3) - Math.min(...a3);
-  const a4diff   = Math.max(...a4) - Math.min(...a4);
-  const bestDiff = Math.max(a3diff, a4diff);
+  const a4diff = Math.max(...a4) - Math.min(...a4);
   let score = 0;
-  if (bestDiff > 8)      score += 40;
-  else if (bestDiff > 5) score += 25;
-  if (bestDiff <= 2)     score -= 15;
-  return { score: Math.max(0, score), diff: bestDiff };
+  if (a4diff > 8)      score += 40;
+  else if (a4diff > 5) score += 25;
+  if (a4diff <= 2)     score -= 15;
+  return { score: Math.max(0, score), diff: a4diff, suggestedSystem: 'A4' };
 }
 
 // ─── C) Score Jacobo ──────────────────────────────────────────────────────────
@@ -113,7 +112,8 @@ function computeBestSystem(spins, passTarget = 2, systemOverride = null) {
     range:  computeMirrorState(spins, 'range'),
   };
   const jacoboState  = computeJacoboState(spins);
-  const bettingState = computeBettingState(spins, systemOverride, parseInt(passTarget));
+  // AUTO MODE: lock de SECTORES siempre evalúa A4, nunca A3
+  const bettingState = computeBettingState(spins, 'A4', parseInt(passTarget));
 
   // Lock: ciclo activo en progreso → mantener sistema
   for (const [mode, mState] of Object.entries(mirrorStates)) {

@@ -71,36 +71,34 @@ function scoreMirrorSystem(spins) {
   return { score: Math.max(0, best.score), mode: best.mode, streak: best.streak, reason };
 }
 
-// ─── B) Score Sectores ────────────────────────────────────────────────────────
+// ─── B) Score Sectores A4 ────────────────────────────────────────────────────
+// AUTO MODE usa exclusivamente A4. A3 queda fuera del motor automático.
 // +40 dif > 8 · +25 dif > 5 · -15 distribución uniforme
 function scoreSectorsSystem(spins) {
   const recent = spins.slice(-SECTOR_EVAL_WINDOW).filter(s => s.number !== 0);
   if (recent.length < 10) {
-    return { score: 0, reason: 'Sectores: datos insuficientes', diff: 0 };
+    return { score: 0, reason: 'A4: datos insuficientes', diff: 0, suggestedSystem: 'A4' };
   }
 
-  const a3 = [0, 0, 0], a4 = [0, 0, 0, 0];
+  // Solo A4 — A3 excluido del motor automático
+  const a4 = [0, 0, 0, 0];
   for (const s of recent) {
-    if (s.sector_a3 >= 1 && s.sector_a3 <= 3) a3[s.sector_a3 - 1]++;
     if (s.sector_a4 >= 1 && s.sector_a4 <= 4) a4[s.sector_a4 - 1]++;
   }
 
-  const a3diff     = Math.max(...a3) - Math.min(...a3);
-  const a4diff     = Math.max(...a4) - Math.min(...a4);
-  const bestDiff   = Math.max(a3diff, a4diff);
-  const bestSystem = a3diff >= a4diff ? 'A3' : 'A4';
+  const a4diff = Math.max(...a4) - Math.min(...a4);
 
   let score = 0;
-  if (bestDiff > 8)      score += 40;
-  else if (bestDiff > 5) score += 25;
-  if (bestDiff <= 2)     score -= 15;
+  if (a4diff > 8)      score += 40;
+  else if (a4diff > 5) score += 25;
+  if (a4diff <= 2)     score -= 15;
 
   let reason;
-  if (bestDiff > 8)      reason = `Desbalance fuerte en ${bestSystem} (Δ${bestDiff})`;
-  else if (bestDiff > 5) reason = `Desbalance moderado en ${bestSystem} (Δ${bestDiff})`;
-  else                   reason = `Distribución uniforme (Δ${bestDiff})`;
+  if (a4diff > 8)      reason = `Desbalance fuerte en A4 (Δ${a4diff})`;
+  else if (a4diff > 5) reason = `Desbalance moderado en A4 (Δ${a4diff})`;
+  else                 reason = `Distribución uniforme A4 (Δ${a4diff})`;
 
-  return { score: Math.max(0, score), diff: bestDiff, suggestedSystem: bestSystem, reason };
+  return { score: Math.max(0, score), diff: a4diff, suggestedSystem: 'A4', reason };
 }
 
 // ─── C) Score Jacobo ──────────────────────────────────────────────────────────
@@ -162,7 +160,8 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null) 
     range:  computeMirrorState(spins, 'range'),
   };
   const jacoboState  = computeJacoboState(spins);
-  const bettingState = computeBettingState(spins, systemOverride, passTarget);
+  // AUTO MODE: lock de SECTORES siempre evalúa A4, nunca A3
+  const bettingState = computeBettingState(spins, 'A4', passTarget);
 
   // ── Lock: ciclo activo → no cambiar sistema ──
   const modeLabels = { color: 'Color', parity: 'Paridad', range: 'Rango' };
