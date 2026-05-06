@@ -68,31 +68,19 @@ function runStats(seq) {
 function preAnalysis(spins) {
   if (spins.length < PRE_ANALYSIS_WINDOW) return null;
   const recent = spins.slice(-PRE_ANALYSIS_WINDOW);
-  const a3seq = recent.map(s => s.sector_a3).filter(Boolean);
   const a4seq = recent.map(s => s.sector_a4).filter(Boolean);
-  const a3 = runStats(a3seq);
   const a4 = runStats(a4seq);
-  if (!a3 || !a4) return null;
+  if (!a4) return null;
 
-  const scoreA3 = -(a3.variance * 0.5 + a3.freqVariance * 0.35 + a3.avg * 0.15);
   const scoreA4 = -(a4.variance * 0.5 + a4.freqVariance * 0.35 + a4.avg * 0.15);
-  const selected = scoreA3 >= scoreA4 ? 'A3' : 'A4';
-  const diff = Math.abs(scoreA3 - scoreA4);
-  const isConclusive = diff > 0.08;
-
-  const w = selected === 'A3' ? a3 : a4;
-  const l = selected === 'A3' ? a4 : a3;
-  const reasons = [];
-  if (w.variance < l.variance) reasons.push(`varianza ${w.variance.toFixed(2)} < ${l.variance.toFixed(2)}`);
-  if (w.avg <= l.avg) reasons.push(`racha avg ${w.avg.toFixed(1)} ≤ ${l.avg.toFixed(1)}`);
-  if (w.freqVariance < l.freqVariance) reasons.push('distribución más balanceada');
+  const isConclusive = a4seq.length >= PRE_ANALYSIS_WINDOW * 0.8;
 
   return {
-    selected, isConclusive,
-    confidence: Math.min(99, Math.round(diff / 0.4 * 100)),
-    a3, a4,
-    scores: { A3: scoreA3, A4: scoreA4 },
-    reason: reasons.join(' · ') || `${selected} marginalmente preferido`
+    selected: 'A4', isConclusive,
+    confidence: Math.min(99, Math.round(Math.abs(scoreA4) / 0.4 * 100)),
+    a4,
+    scores: { A4: scoreA4 },
+    reason: 'Sistema A4 activo'
   };
 }
 
@@ -203,8 +191,8 @@ function computeBettingState(spins, systemTypeOverride = null, passTarget = 2) {
   }
 
   const analysis     = preAnalysis(spins);
-  const system       = systemTypeOverride || analysis?.selected || 'A3';
-  const key          = system === 'A3' ? 'sector_a3' : 'sector_a4';
+  const system       = (systemTypeOverride && systemTypeOverride !== 'A3') ? systemTypeOverride : (analysis?.selected || 'A4');
+  const key          = 'sector_a4';
   const winsRequired = passTarget === 3 ? 3 : 2;
 
   const c     = runCycle(spins, key, winsRequired);
@@ -250,7 +238,7 @@ function calculateBetResult(bettingState, newSpinSectorA3, newSpinSectorA4) {
     return null;
   }
 
-  const sectorValue = bettingState.systemType === 'A3' ? newSpinSectorA3 : newSpinSectorA4;
+  const sectorValue = newSpinSectorA4;
   const chips = bettingState.currentChips;
 
   if (sectorValue === null || sectorValue === undefined) {

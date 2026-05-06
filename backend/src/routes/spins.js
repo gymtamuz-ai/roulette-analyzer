@@ -59,7 +59,10 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color', lockedSystem = null } = req.body;
+  let { sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color', lockedSystem = null } = req.body;
+  // Safety: A3 was removed; remap any legacy A3 reference to A4
+  if (systemType === 'A3') systemType = 'A4';
+  if (lockedSystem === 'A3') lockedSystem = 'A4';
   if (sessionId === undefined || number === undefined) {
     return res.status(400).json({ error: 'sessionId and number are required' });
   }

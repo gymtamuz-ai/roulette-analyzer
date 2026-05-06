@@ -1,4 +1,3 @@
-import React from 'react';
 import { RED_NUMBERS } from '../utils/roulette';
 
 // ─── Generic delay bar row ────────────────────────────────────────────────────
@@ -83,7 +82,7 @@ export default function DelayPanel({ allDelays, maxDelays, totalSpins }) {
     );
   }
 
-  const { numbers, color, parity, half, dozen, col, sectorA3, sectorA4, cylinder } = allDelays;
+  const { numbers, color, parity, half, dozen, col, sectorA4, cylinder } = allDelays;
   const mx = maxDelays || {};
 
   const expectedNum    = 37;
@@ -134,13 +133,10 @@ export default function DelayPanel({ allDelays, maxDelays, totalSpins }) {
         <DelayRow label="C3"       delay={col?.[3]   ?? 0} maxDelay={mx.col?.[3]   ?? 0} expected={expectedCol}   color="bg-pink-600"  />
       </Section>
 
-      {/* ── Sectores A3 / A4 ── */}
-      <Section title="Sectores A3 / A4" cols={2} legend>
+      {/* ── Sectores A4 ── */}
+      <Section title="Sectores A4" legend>
         {[1,2,3,4].map(s => (
-          <React.Fragment key={s}>
-            <DelayRow label={`A3·S${s}`} delay={sectorA3?.[s] ?? 0} maxDelay={mx.sectorA3?.[s] ?? 0} expected={expectedSectA} color="bg-orange-600" />
-            <DelayRow label={`A4·S${s}`} delay={sectorA4?.[s] ?? 0} maxDelay={mx.sectorA4?.[s] ?? 0} expected={expectedSectA} color="bg-violet-600" />
-          </React.Fragment>
+          <DelayRow key={s} label={`S${s}`} delay={sectorA4?.[s] ?? 0} maxDelay={mx.sectorA4?.[s] ?? 0} expected={expectedSectA} color="bg-violet-600" />
         ))}
       </Section>
 

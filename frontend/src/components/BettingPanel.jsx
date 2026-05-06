@@ -172,7 +172,7 @@ export default function BettingPanel({
     );
   }
 
-  // ── Sectors mode (existing A3/A4 logic below) ──
+  // ── Sectors mode (A4) ──
   if (!bettingState) {
     return (
       <div className="card">
@@ -216,7 +216,6 @@ export default function BettingPanel({
           <select value={systemOverride || 'auto'} onChange={e => onSystemOverride(e.target.value === 'auto' ? null : e.target.value)}
             className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300">
             <option value="auto">Auto ({autoSystem || '?'})</option>
-            <option value="A3">A3</option>
             <option value="A4">A4</option>
           </select>
         </div>
@@ -233,7 +232,7 @@ export default function BettingPanel({
             </div>
           )}
           <div className="mt-3 bg-gray-900 rounded-lg p-2 text-xs text-gray-500">
-            El sistema requiere {PRE_ANALYSIS_WINDOW} tiradas previas para analizar A3 vs A4 y detectar la secuencia óptima.
+            El sistema requiere {PRE_ANALYSIS_WINDOW} tiradas previas para analizar A4 y detectar la secuencia óptima.
           </div>
         </div>
       ) : (

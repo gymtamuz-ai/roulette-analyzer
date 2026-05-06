@@ -88,12 +88,6 @@ export default function StatsPanel({ spins }) {
         <Bar label="3ª (25–36)" value={count('dozen', 3)} max={total} color="bg-indigo-600" />
       </Section>
 
-      <Section title="Sectores A3">
-        {[1, 2, 3, 4].map(s => (
-          <Bar key={s} label={`S${s}`} value={count('sector_a3', s)} max={total} color="bg-orange-600" />
-        ))}
-      </Section>
-
       <Section title="Sectores A4">
         {[1, 2, 3, 4].map(s => (
           <Bar key={s} label={`S${s}`} value={count('sector_a4', s)} max={total} color="bg-violet-600" />

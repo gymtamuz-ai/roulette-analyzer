@@ -146,13 +146,6 @@ export function calculateAllDelays(spins) {
       2: delay(spins, s => s.col === 2),
       3: delay(spins, s => s.col === 3),
     },
-    // A3 sectors
-    sectorA3: {
-      1: delay(spins, s => s.sector_a3 === 1),
-      2: delay(spins, s => s.sector_a3 === 2),
-      3: delay(spins, s => s.sector_a3 === 3),
-      4: delay(spins, s => s.sector_a3 === 4),
-    },
     // A4 sectors
     sectorA4: {
       1: delay(spins, s => s.sector_a4 === 1),
@@ -173,9 +166,8 @@ export function calculateAllDelays(spins) {
 export function calculateDelays(spins) {
   return calculateAllDelays(spins)?.numbers || {};
 }
-export function calculateSectorDelays(spins, type) {
-  const all = calculateAllDelays(spins);
-  return type === 'A3' ? (all?.sectorA3 || {}) : (all?.sectorA4 || {});
+export function calculateSectorDelays(spins) {
+  return calculateAllDelays(spins)?.sectorA4 || {};
 }
 
 // ─── Trends ───────────────────────────────────────────────────────────────────
@@ -192,7 +184,6 @@ export function calculateTrends(spins, windows = [10, 25, 50]) {
       color: countBy(recent, 'color'),
       parity: countBy(recent, 'parity'),
       dozen: countBy(recent, 'dozen'),
-      sectorA3: countBy(recent, 'sector_a3'),
       sectorA4: countBy(recent, 'sector_a4'),
       cylinder: countBy(recent, 'cylinder_sector')
     };
@@ -235,32 +226,19 @@ function runStats(seq) {
 export function preAnalysis(spins) {
   if (spins.length < PRE_ANALYSIS_WINDOW) return null;
   const recent = spins.slice(-PRE_ANALYSIS_WINDOW);
-  const a3seq = recent.map(s => s.sector_a3).filter(Boolean);
   const a4seq = recent.map(s => s.sector_a4).filter(Boolean);
-  const a3 = runStats(a3seq);
   const a4 = runStats(a4seq);
-  if (!a3 || !a4) return null;
+  if (!a4) return null;
 
-  // Lower variance + lower freqVariance = more stable = better
-  const scoreA3 = -(a3.variance * 0.5 + a3.freqVariance * 0.35 + a3.avg * 0.15);
   const scoreA4 = -(a4.variance * 0.5 + a4.freqVariance * 0.35 + a4.avg * 0.15);
-  const selected = scoreA3 >= scoreA4 ? 'A3' : 'A4';
-  const diff = Math.abs(scoreA3 - scoreA4);
-  const isConclusive = diff > 0.08;
-
-  const w = selected === 'A3' ? a3 : a4;
-  const l = selected === 'A3' ? a4 : a3;
-  const reasons = [];
-  if (w.variance < l.variance) reasons.push(`varianza ${w.variance.toFixed(2)} < ${l.variance.toFixed(2)}`);
-  if (w.avg <= l.avg) reasons.push(`racha avg ${w.avg.toFixed(1)} ≤ ${l.avg.toFixed(1)}`);
-  if (w.freqVariance < l.freqVariance) reasons.push('distribución más balanceada');
+  const isConclusive = a4seq.length >= PRE_ANALYSIS_WINDOW * 0.8;
 
   return {
-    selected, isConclusive,
-    confidence: Math.min(99, Math.round(diff / 0.4 * 100)),
-    a3, a4,
-    scores: { A3: scoreA3, A4: scoreA4 },
-    reason: reasons.join(' · ') || `${selected} marginalmente preferido`
+    selected: 'A4', isConclusive,
+    confidence: Math.min(99, Math.round(Math.abs(scoreA4) / 0.4 * 100)),
+    a4,
+    scores: { A4: scoreA4 },
+    reason: 'Sistema A4 activo'
   };
 }
 
@@ -431,8 +409,9 @@ export function computeStateMachine(spins, systemTypeOverride = null, passTarget
   }
 
   const analysis = preAnalysis(spins);
-  const system   = systemTypeOverride || analysis?.selected || 'A3';
-  const key      = system === 'A3' ? 'sector_a3' : 'sector_a4';
+  // A3 is removed — always use A4
+  const system   = (systemTypeOverride && systemTypeOverride !== 'A3') ? systemTypeOverride : 'A4';
+  const key      = 'sector_a4';
 
   const winsRequired = passTarget === 3 ? 3 : 2;
   const c     = runCycle(spins, key, winsRequired);
@@ -526,8 +505,6 @@ export function calculateMaxDelays(spins) {
                 high:  maxD(s => s.number >= 19) },
     dozen:    { 1: maxD(s => s.dozen === 1), 2: maxD(s => s.dozen === 2), 3: maxD(s => s.dozen === 3) },
     col:      { 1: maxD(s => s.col === 1),   2: maxD(s => s.col === 2),   3: maxD(s => s.col === 3) },
-    sectorA3: { 1: maxD(s => s.sector_a3 === 1), 2: maxD(s => s.sector_a3 === 2),
-                3: maxD(s => s.sector_a3 === 3), 4: maxD(s => s.sector_a3 === 4) },
     sectorA4: { 1: maxD(s => s.sector_a4 === 1), 2: maxD(s => s.sector_a4 === 2),
                 3: maxD(s => s.sector_a4 === 3), 4: maxD(s => s.sector_a4 === 4) },
     cylinder: { S0:  maxD(s => s.cylinder_sector === 'S0'),

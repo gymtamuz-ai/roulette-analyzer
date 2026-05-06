@@ -18,7 +18,6 @@ router.get('/session/:sessionId', async (req, res) => {
 
     const frequencies = calculateFrequencies(spins);
     const delays = calculateDelays(spins);
-    const sectorDelaysA3 = calculateSectorDelays(spins, 'A3');
     const sectorDelaysA4 = calculateSectorDelays(spins, 'A4');
     const trends = calculateTrends(spins);
     const bettingState = computeBettingState(spins, systemType || null, parseInt(passTarget));
@@ -27,7 +26,6 @@ router.get('/session/:sessionId', async (req, res) => {
       totalSpins: spins.length,
       frequencies,
       delays,
-      sectorDelaysA3,
       sectorDelaysA4,
       trends,
       bettingState
