@@ -52,6 +52,10 @@ export const api = {
   getResults:        (sessionId)              => get(`/results/session/${sessionId}`),
   getResultsSummary: (sessionId)              => get(`/results/session/${sessionId}/summary`),
 
+  // Import history
+  importSpins: (sessionId, numbers, replaceExisting = false) =>
+    post(`/import/${sessionId}`, { numbers, replaceExisting }),
+
   // Hot Windows
   getHotWindows:  (tableId) => get(`/hot-windows/${tableId}`),
 

@@ -20,6 +20,7 @@ import SessionManager from './components/SessionManager';
 import PerformancePanel from './components/PerformancePanel';
 import HotNumbersPanel from './components/HotNumbersPanel';
 import TableMemoryPanel from './components/TableMemoryPanel';
+import ImportModal from './components/ImportModal';
 
 // ─── localStorage keys ────────────────────────────────────────────────────────
 const LS_SESSION      = 'roulette_session';
@@ -47,6 +48,7 @@ export default function App() {
   const [mirrorMode,  setMirrorMode]        = useState(() => localStorage.getItem(LS_MIRROR_MODE)  || 'color');
   const [error, setError]                   = useState('');
   const [strategyLock, setStrategyLock]     = useState(null);
+  const [showImport, setShowImport]         = useState(false);
   const simRef = useRef(null);
 
   // Persist bettingMode
@@ -258,6 +260,22 @@ export default function App() {
 
   const handleExport = () => { if (session) window.open(api.exportCSV(session.id), '_blank'); };
 
+  // ─── Reload everything after bulk import ──────────────────────────────────
+  const handleImported = useCallback(async () => {
+    if (!session) return;
+    try {
+      const [spinsData, resultsData, summaryData] = await Promise.all([
+        api.getSpins(session.id),
+        api.getResults(session.id),
+        api.getResultsSummary(session.id),
+      ]);
+      setSpins(spinsData.map(enrichSpin));
+      setResults(resultsData);
+      setResultsSummary(summaryData);
+      setStrategyLock(null);
+    } catch (e) { setError('Error recargando datos: ' + e.message); }
+  }, [session]);
+
   // ─── Session manager screen ───────────────────────────────────────────────
   if (showManager) {
     return (
@@ -307,6 +325,14 @@ export default function App() {
             </div>
           )}
 
+          <button
+            onClick={() => setShowImport(true)}
+            disabled={!session}
+            className="btn-ghost text-xs disabled:opacity-30"
+            title="Importar historial de números"
+          >
+            📥 Importar
+          </button>
           <button onClick={handleExport} disabled={!session || spins.length === 0} className="btn-ghost text-xs disabled:opacity-30">
             ↓ CSV
           </button>
@@ -375,6 +401,16 @@ export default function App() {
           <TableMemoryPanel tableId={table?.id} />
         </div>
       </main>
+
+      {/* ── Import modal ── */}
+      {showImport && session && (
+        <ImportModal
+          session={session}
+          spinsCount={spins.length}
+          onClose={() => setShowImport(false)}
+          onImported={() => { setShowImport(false); handleImported(); }}
+        />
+      )}
     </div>
   );
 }
