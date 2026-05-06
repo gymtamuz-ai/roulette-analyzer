@@ -8,11 +8,15 @@ const THEORETICAL_PCT = 100 / 37; // 2.7027...%
 /**
  * GET /api/table-memory/:tableId
  *
- * Devuelve el acumulado histórico de esa mesa:
+ * Devuelve el acumulado histórico de esa mesa, calculado dinámicamente
+ * desde hot_windows (así refleja exactamente los bloques vigentes —
+ * los hot_windows se borran en cascada al borrar sesiones, por lo que
+ * nunca hay datos fantasma de sesiones eliminadas).
+ *
  * {
- *   totalSpins,   — total de tiradas registradas en table_memory
- *   totalBlocks,  — bloques de 36 completados
- *   numbers: [{ number, hits, percentage, deviation }]
+ *   totalSpins,   — totalBlocks × 36
+ *   totalBlocks,  — bloques de 36 completados vigentes
+ *   numbers: [{ number, hits, percentage, deviation }]  — los 37 números
  * }
  */
 router.get('/:tableId', async (req, res) => {
@@ -20,33 +24,37 @@ router.get('/:tableId', async (req, res) => {
   if (isNaN(tableId)) return res.status(400).json({ error: 'tableId must be a number' });
 
   try {
-    const [memRes, blocksRes] = await Promise.all([
-      pool.query(
-        `SELECT number, hits
-           FROM table_memory
-          WHERE table_id = $1
-          ORDER BY number ASC`,
-        [tableId]
-      ),
-      pool.query(
-        `SELECT COUNT(*)::INTEGER AS total
-           FROM hot_windows
-          WHERE table_id = $1`,
-        [tableId]
-      ),
-    ]);
+    // Leer todos los bloques de esta mesa directamente desde hot_windows
+    const { rows: windows } = await pool.query(
+      `SELECT numbers FROM hot_windows WHERE table_id = $1`,
+      [tableId]
+    );
 
-    const totalBlocks = blocksRes.rows[0].total;
-    const totalSpins  = memRes.rows.reduce((sum, r) => sum + parseInt(r.hits), 0);
+    const totalBlocks = windows.length;
+    const totalSpins  = totalBlocks * 36; // exacto: cada bloque tiene exactamente 36 tiradas
 
-    const numbers = memRes.rows.map(r => {
-      const hits       = parseInt(r.hits);
+    // Agregar hits por número a partir de cada bloque
+    const hitsMap = {};
+    for (const { numbers } of windows) {
+      // numbers puede llegar como objeto JS (JSONB) o como string según el driver
+      const parsed = typeof numbers === 'string' ? JSON.parse(numbers) : numbers;
+      for (const { num, count } of parsed) {
+        hitsMap[num] = (hitsMap[num] || 0) + count;
+      }
+    }
+
+    // Construir respuesta para los 37 números (0-36)
+    const numbers = [];
+    for (let n = 0; n <= 36; n++) {
+      const hits       = hitsMap[n] || 0;
       const percentage = totalSpins > 0
         ? parseFloat(((hits / totalSpins) * 100).toFixed(2))
         : 0;
       const deviation  = parseFloat((percentage - THEORETICAL_PCT).toFixed(2));
-      return { number: parseInt(r.number), hits, percentage, deviation };
-    });
+      numbers.push({ number: n, hits, percentage, deviation });
+    }
+    // Ordenar por desviación descendente (los más calientes primero)
+    numbers.sort((a, b) => b.deviation - a.deviation || a.number - b.number);
 
     res.json({ totalSpins, totalBlocks, numbers });
   } catch (err) {
