@@ -102,7 +102,7 @@ function getRiskPenalty(state) {
 }
 
 // ─── Motor principal ──────────────────────────────────────────────────────────
-function computeBestSystem(spins, passTarget = 2, systemOverride = null) {
+function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedSystem = null) {
   if (!spins || spins.length === 0) return { system: null, mirrorMode: null };
 
   // Computar estados
@@ -114,6 +114,25 @@ function computeBestSystem(spins, passTarget = 2, systemOverride = null) {
   const jacoboState  = computeJacoboState(spins);
   // AUTO MODE: lock de SECTORES siempre evalúa A4, nunca A3
   const bettingState = computeBettingState(spins, 'A4', parseInt(passTarget));
+
+  // ── LOCK EXTERNO: sistema elegido previamente → mantener hasta fin de ciclo ──
+  if (lockedSystem) {
+    const { system: ls, mirrorMode: lm } = lockedSystem;
+    let stillCycling = false;
+
+    if (ls === 'ESPEJO') {
+      const mState = lm ? (mirrorStates[lm] || computeMirrorState(spins, lm)) : null;
+      stillCycling = mState ? mState.status !== 'WAITING' : false;
+    } else if (ls === 'JACOBO') {
+      stillCycling = jacoboState.isActive;
+    } else if (ls === 'SECTORES') {
+      stillCycling = bettingState?.active ?? false;
+    }
+
+    if (stillCycling) {
+      return { system: ls, mirrorMode: lm ?? null };
+    }
+  }
 
   // Lock: ciclo activo en progreso → mantener sistema
   for (const [mode, mState] of Object.entries(mirrorStates)) {

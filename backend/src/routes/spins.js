@@ -9,7 +9,7 @@ const { computeBestSystem }                            = require('../utils/autoS
 const { computeHotNumbers }                            = require('../utils/hotNumbers');
 
 // ─── Compute bet result for any mode ──────────────────────────────────────────
-function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color') {
+function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color', lockedSystem = null) {
   if (bettingMode === 'jacobo') {
     const state = computeJacoboState(previousSpins);
     return calculateJacoboBetResult(state, newSpinCls.number);
@@ -19,7 +19,7 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
     return calculateMirrorBetResult(state, newSpinCls);
   }
   if (bettingMode === 'auto') {
-    const auto = computeBestSystem(previousSpins, passTarget, systemType);
+    const auto = computeBestSystem(previousSpins, passTarget, systemType, lockedSystem);
     if (!auto.system) return null;
     if (auto.system === 'ESPEJO') {
       const state = computeMirrorState(previousSpins, auto.mirrorMode || 'color');
@@ -59,7 +59,7 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color' } = req.body;
+  const { sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color', lockedSystem = null } = req.body;
   if (sessionId === undefined || number === undefined) {
     return res.status(400).json({ error: 'sessionId and number are required' });
   }
@@ -97,7 +97,7 @@ router.post('/', async (req, res) => {
     );
 
     // Calculate and persist bet result using the active betting mode
-    let betResult = computeActiveBetResult(previousSpins, cls, passTarget, systemType, bettingMode, mirrorMode);
+    let betResult = computeActiveBetResult(previousSpins, cls, passTarget, systemType, bettingMode, mirrorMode, lockedSystem);
     if (betResult) {
       // Get current running balance for this session
       const balRes = await client.query(

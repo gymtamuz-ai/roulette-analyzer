@@ -46,6 +46,7 @@ export default function App() {
   const [bettingMode, setBettingMode]       = useState(() => localStorage.getItem(LS_BETTING_MODE) || 'sectors');
   const [mirrorMode,  setMirrorMode]        = useState(() => localStorage.getItem(LS_MIRROR_MODE)  || 'color');
   const [error, setError]                   = useState('');
+  const [strategyLock, setStrategyLock]     = useState(null);
   const simRef = useRef(null);
 
   // Persist bettingMode
@@ -66,7 +67,7 @@ export default function App() {
   const maxDelays      = calculateMaxDelays(spins);
   const bettingState   = computeBettingState(spins, systemOverride, passTarget);
   const jacoboState    = computeJacoboState(spins);
-  const autoSystemState = computeBestSystem(spins, passTarget, systemOverride);
+  const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock);
   const hotNumbers      = useMemo(() => getHotNumbers(spins), [spins]);
 
   // In auto mode, use the auto-chosen mirror mode; otherwise user-chosen
@@ -116,12 +117,44 @@ export default function App() {
       .finally(() => setLoading(false));
   }, [session?.id]);
 
+  // ─── Strategy lock: prevent AUTO MODE from switching mid-progression ─────
+  useEffect(() => {
+    if (bettingMode !== 'auto') { setStrategyLock(null); return; }
+    if (!autoSystemState)       return;
+    const { system, mirrorMode: autoMM, locked, lockReleased } = autoSystemState;
+    setStrategyLock(prev => {
+      // External lock says the system is still cycling — keep existing ref
+      if (prev && locked && !lockReleased && prev.system === system) return prev;
+      // Lock just released: if scoring found a new system, adopt it; else clear
+      if (lockReleased && prev) {
+        if (!system) return null;
+        if (system === prev.system && autoMM === prev.mirrorMode) return prev;
+        return { system, mirrorMode: autoMM ?? null };
+      }
+      // No prior lock: set one if a system was freshly chosen
+      if (!prev && system) return { system, mirrorMode: autoMM ?? null };
+      // Clear lock if no system chosen
+      if (!system) return null;
+      return prev;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSystemState?.system, autoSystemState?.locked, autoSystemState?.lockReleased, bettingMode]);
+
+  // Clear lock when bettingMode changes away from auto or session changes
+  useEffect(() => {
+    setStrategyLock(null);
+  }, [session?.id]);
+
   // ─── Register a spin ──────────────────────────────────────────────────────
   const handleSpin = useCallback(async (number) => {
     if (!session) return;
     setError('');
     try {
-      const response = await api.addSpin(session.id, number, passTarget, systemOverride, bettingMode, effectiveMirrorMode);
+      const response = await api.addSpin(
+        session.id, number, passTarget, systemOverride, bettingMode,
+        effectiveMirrorMode,
+        bettingMode === 'auto' ? strategyLock : null
+      );
       const { bet_result, ...spin } = response;
       setSpins(prev => [...prev, enrichSpin(spin)]);
 
@@ -180,7 +213,7 @@ export default function App() {
     } catch (e) {
       setError(e.message);
     }
-  }, [session, passTarget, systemOverride, bettingMode, effectiveMirrorMode]);
+  }, [session, passTarget, systemOverride, bettingMode, effectiveMirrorMode, strategyLock]);
 
   // ─── Undo last spin ───────────────────────────────────────────────────────
   const handleUndo = useCallback(async () => {

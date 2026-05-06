@@ -148,9 +148,9 @@ function getRiskPenalty(state) {
 }
 
 // ─── Motor principal ──────────────────────────────────────────────────────────
-export function computeBestSystem(spins, passTarget = 2, systemOverride = null) {
+export function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedSystem = null) {
   if (!spins || spins.length === 0) {
-    return { system: null, confidence: 0, reason: 'Sin datos', scoreBreakdown: null, locked: false };
+    return { system: null, confidence: 0, reason: 'Sin datos', scoreBreakdown: null, locked: false, lockReleased: false };
   }
 
   // ── Computar estados (para detección de lock) ──
@@ -163,13 +163,47 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null) 
   // AUTO MODE: lock de SECTORES siempre evalúa A4, nunca A3
   const bettingState = computeBettingState(spins, 'A4', passTarget);
 
+  // ── LOCK EXTERNO: sistema elegido previamente → mantener hasta fin de ciclo ──
+  if (lockedSystem) {
+    const { system: ls, mirrorMode: lm } = lockedSystem;
+    let stillCycling = false;
+    let lockReason   = '';
+
+    if (ls === 'ESPEJO') {
+      const mState = lm ? (mirrorStates[lm] || computeMirrorState(spins, lm)) : null;
+      stillCycling = mState ? mState.status !== 'WAITING' : false;
+      lockReason   = mState?.reason ?? '';
+    } else if (ls === 'JACOBO') {
+      stillCycling = jacoboState.isActive;
+      lockReason   = jacoboState.currentStep ? `paso ${jacoboState.currentStep}` : '';
+    } else if (ls === 'SECTORES') {
+      stillCycling = bettingState?.active ?? false;
+      lockReason   = bettingState?.active ? `bola ${bettingState.currentBall}/${bettingState.totalBalls}` : '';
+    }
+
+    if (stillCycling) {
+      console.log(`[AUTO] Lock activo: ${ls}${lm ? `/${lm}` : ''} — ignorando otros sistemas`);
+      return {
+        system:    ls,
+        mirrorMode: lm ?? null,
+        confidence: 90,
+        locked:    true,
+        lockReleased: false,
+        reason:    `🔒 ${ls}${lockReason ? ` — ${lockReason}` : ''}`,
+        scoreBreakdown: null,
+      };
+    }
+
+    console.log(`[AUTO] Ciclo de ${ls} terminado → lock liberado`);
+  }
+
   // ── Lock: ciclo activo → no cambiar sistema ──
   const modeLabels = { color: 'Color', parity: 'Paridad', range: 'Rango' };
 
   for (const [mode, mState] of Object.entries(mirrorStates)) {
     if (mState.isActive) {
       return {
-        system: 'ESPEJO', confidence: 85, locked: true,
+        system: 'ESPEJO', confidence: 85, locked: true, lockReleased: !!lockedSystem,
         mirrorMode: mode,
         reason: `Ciclo activo · ${modeLabels[mode]} paso ${mState.currentStep}/${mState.totalSteps}`,
         scoreBreakdown: null,
@@ -179,7 +213,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null) 
 
   if (jacoboState.isActive) {
     return {
-      system: 'JACOBO', confidence: jacoboState.confidence || 70, locked: true,
+      system: 'JACOBO', confidence: jacoboState.confidence || 70, locked: true, lockReleased: !!lockedSystem,
       mirrorMode: null,
       reason: `Ciclo activo · paso ${jacoboState.currentStep ?? 1}`,
       scoreBreakdown: null,
@@ -188,7 +222,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null) 
 
   if (bettingState?.active) {
     return {
-      system: 'SECTORES', confidence: 65, locked: true,
+      system: 'SECTORES', confidence: 65, locked: true, lockReleased: !!lockedSystem,
       mirrorMode: null,
       reason: `Ciclo activo · bola ${bettingState.currentBall}/${bettingState.totalBalls}`,
       scoreBreakdown: null,
@@ -231,7 +265,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null) 
 
   if (candidates.length === 0) {
     return {
-      system: null, confidence: 0, locked: false,
+      system: null, confidence: 0, locked: false, lockReleased: !!lockedSystem,
       mirrorMode: null,
       reason: 'Sin señal suficiente — no apostar',
       scoreBreakdown,
@@ -248,6 +282,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null) 
     system:     best.system,
     confidence: Math.min(99, best.score),
     locked:     false,
+    lockReleased: !!lockedSystem,
     mirrorMode: best.mirrorMode,
     reason:     best.reason,
     scoreBreakdown,

@@ -86,8 +86,10 @@ export default function AutoModePanel({ autoState }) {
       <div className="flex items-center gap-2">
         <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse shrink-0" />
         <span className="text-xs font-black text-yellow-400 tracking-wide">MODO AUTO</span>
-        {locked && (
-          <span className="ml-auto text-xs text-cyan-400 font-bold">🔒 CICLO ACTIVO</span>
+        {locked && system && (
+          <span className={`ml-auto text-xs font-bold ${SYSTEM_CFG[system]?.text ?? 'text-cyan-400'}`}>
+            🔒 {SYSTEM_CFG[system]?.label ?? system}
+          </span>
         )}
       </div>
 

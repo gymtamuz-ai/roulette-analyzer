@@ -42,8 +42,8 @@ export const api = {
 
   // Spins
   getSpins:      (sessionId)       => get(`/spins?sessionId=${sessionId}&limit=10000`),
-  addSpin:       (sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color') =>
-    post('/spins', { sessionId, number, passTarget, systemType, bettingMode, mirrorMode }),
+  addSpin:       (sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color', lockedSystem = null) =>
+    post('/spins', { sessionId, number, passTarget, systemType, bettingMode, mirrorMode, lockedSystem }),
   deleteLast:    (sessionId)       => del(`/spins/last?sessionId=${sessionId}`),
   bulkSpins:     (sessionId, numbers, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color') =>
     post('/spins/bulk', { sessionId, numbers, passTarget, systemType, bettingMode, mirrorMode }),
