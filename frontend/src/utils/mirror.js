@@ -11,7 +11,7 @@
 // ─── Constantes ───────────────────────────────────────────────────────────────
 export const MIRROR_WINDOW      = 10;  // tamaño de la ventana
 export const MIN_WATCH_LOSSES   = 3;   // fallos observados → activa la apuesta
-export const MIN_LOSS_STREAK    = 3;   // pérdidas apostadas consecutivas → bloqueo
+export const MIN_LOSS_STREAK    = 7;   // pasos de apuesta antes del bloqueo (posiciones 4-10)
 export const BLOCK_SPINS        = 10;  // tiradas bloqueadas tras 3 pérdidas
 export const EXTENDED_MAX_STEPS = 10;  // pasos disponibles en la progresión
 export const DEFAULT_MAX_STEPS  = 3;   // máximo antes de bloqueo

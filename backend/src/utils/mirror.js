@@ -5,7 +5,7 @@
 
 const MIRROR_WINDOW      = 10;
 const MIN_WATCH_LOSSES   = 3;   // fallos observados → activa la apuesta
-const MIN_LOSS_STREAK    = 3;   // pérdidas apostadas consecutivas → bloqueo
+const MIN_LOSS_STREAK    = 7;   // pasos de apuesta antes del bloqueo (posiciones 4-10)
 const BLOCK_SPINS        = 10;
 const EXTENDED_MAX_STEPS = 10;
 const DEFAULT_MAX_STEPS  = 3;
