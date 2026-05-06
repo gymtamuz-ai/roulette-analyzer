@@ -1,4 +1,4 @@
-import { MIRROR_PROGRESSION, MIRROR_WINDOW, MIN_LOSS_STREAK, EXTENDED_MAX_STEPS } from '../utils/mirror';
+import { MIRROR_PROGRESSION, MIRROR_WINDOW, MIN_LOSS_STREAK, MIN_WATCH_LOSSES, EXTENDED_MAX_STEPS } from '../utils/mirror';
 
 // ─── Labels por modo ──────────────────────────────────────────────────────────
 const MODE_CONFIG = {
@@ -118,7 +118,8 @@ export default function MirrorPanel({ state, mirrorMode = 'color', onMirrorModeC
 
   const {
     status = 'WAITING', reason = '', isActive,
-    lossStreak = 0, sequence = [], invertedSequence = [],
+    lossStreak = 0, watchLosses = 0, watchNeeded = MIN_WATCH_LOSSES,
+    sequence = [], invertedSequence = [],
     currentBet, currentStep = 1, totalSteps = EXTENDED_MAX_STEPS, chips = 1,
     isLastStep, onWin, onLoss,
     cyclesCompleted = 0, cyclesAborted = 0,
@@ -147,13 +148,15 @@ export default function MirrorPanel({ state, mirrorMode = 'color', onMirrorModeC
         <div className="rounded-xl p-3 border-2 border-cyan-500 bg-cyan-900/20">
           <div className="text-base font-black text-cyan-400 mb-1">⚡ ESPEJO ACTIVO</div>
           <div className="text-gray-400 text-xs">{reason}</div>
-          {totalSteps === EXTENDED_MAX_STEPS && (
-            <div className="text-cyan-600 text-xs mt-0.5">Ciclo extendido: {totalSteps} pasos</div>
-          )}
+        </div>
+      ) : status === 'WATCHING' ? (
+        <div className="rounded-xl p-3 border-2 border-yellow-600 bg-yellow-900/20">
+          <div className="text-base font-black text-yellow-400 mb-1">👁 OBSERVANDO</div>
+          <div className="text-gray-400 text-xs">{reason}</div>
         </div>
       ) : (
         <div className="rounded-xl p-3 border border-gray-700 bg-gray-800/40">
-          <div className="text-sm font-bold text-gray-400 mb-1">⏸ ESPERANDO RACHA</div>
+          <div className="text-sm font-bold text-gray-400 mb-1">⏸ ESPERANDO VENTANA</div>
           <div className="text-gray-500 text-xs">{reason}</div>
         </div>
       )}
@@ -170,13 +173,22 @@ export default function MirrorPanel({ state, mirrorMode = 'color', onMirrorModeC
         </div>
       )}
 
-      {/* ── WAITING: racha progress ── */}
-      {!isActive && status === 'WAITING' && (
+      {/* ── WATCHING: pronóstico + contador de fallos ── */}
+      {status === 'WATCHING' && currentBet && (
+        <div className="text-center">
+          <div className="text-xs text-yellow-600 mb-1.5">Pronóstico (no apostar aún):</div>
+          <div className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border-2 font-black text-lg opacity-60
+            ${MODE_CONFIG[selectedMode]?.values[currentBet]?.cls || 'bg-gray-700 border-gray-500 text-white'}`}>
+            {MODE_CONFIG[selectedMode]?.values[currentBet]?.label || currentBet}
+          </div>
+        </div>
+      )}
+      {status === 'WATCHING' && (
         <div className="bg-gray-800/60 rounded-lg p-2.5">
-          <div className="text-xs text-gray-500 mb-2">Racha de repeticiones detectada:</div>
-          <StreakDots current={lossStreak} needed={MIN_LOSS_STREAK} />
+          <div className="text-xs text-gray-500 mb-2">Fallos consecutivos observados:</div>
+          <StreakDots current={watchLosses} needed={watchNeeded} />
           <div className="text-xs text-gray-600 mt-1.5 text-center">
-            Activación en racha ≥ {MIN_LOSS_STREAK} → ciclo de {EXTENDED_MAX_STEPS} pasos
+            Al llegar a {watchNeeded} fallos → ⚡ activar apuesta (paso 1 · 1f)
           </div>
         </div>
       )}
@@ -224,15 +236,15 @@ export default function MirrorPanel({ state, mirrorMode = 'color', onMirrorModeC
       )}
 
       {/* ── Progression bar ── */}
-      {(isActive || status === 'WAITING') && (
+      {(isActive || status === 'WATCHING') && (
         <div>
           <div className="text-xs text-gray-400 mb-1.5">
-            Progresión ({isActive ? totalSteps : EXTENDED_MAX_STEPS} pasos):
+            Progresión ({MIN_LOSS_STREAK} pasos):
           </div>
-          <StepBar currentStep={currentStep} totalSteps={isActive ? totalSteps : EXTENDED_MAX_STEPS} />
-          {!isActive && (
+          <StepBar currentStep={currentStep} totalSteps={MIN_LOSS_STREAK} />
+          {status === 'WATCHING' && (
             <div className="text-xs text-gray-700 mt-1 text-center">
-              Se extiende a {EXTENDED_MAX_STEPS} pasos al detectar racha
+              Activa desde paso 1 cuando se cumplan {MIN_WATCH_LOSSES} fallos
             </div>
           )}
         </div>
@@ -268,7 +280,7 @@ export default function MirrorPanel({ state, mirrorMode = 'color', onMirrorModeC
       <div className="flex gap-3 text-xs text-gray-500 border-t border-gray-800 pt-2">
         <span>✅ Ciclos: <span className="text-green-400 font-bold">{cyclesCompleted}</span></span>
         <span>⛔ Abortados: <span className="text-red-400 font-bold">{cyclesAborted}</span></span>
-        <span className="ml-auto text-gray-600">ventana {MIRROR_WINDOW} · racha ≥{MIN_LOSS_STREAK}</span>
+        <span className="ml-auto text-gray-600">ventana {MIRROR_WINDOW} · obs {MIN_WATCH_LOSSES} · apuesta {MIN_LOSS_STREAK}</span>
       </div>
     </div>
   );

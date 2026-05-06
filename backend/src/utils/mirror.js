@@ -4,7 +4,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const MIRROR_WINDOW      = 10;
-const MIN_LOSS_STREAK    = 3;
+const MIN_WATCH_LOSSES   = 3;   // fallos observados → activa la apuesta
+const MIN_LOSS_STREAK    = 3;   // pérdidas apostadas consecutivas → bloqueo
 const BLOCK_SPINS        = 10;
 const EXTENDED_MAX_STEPS = 10;
 const DEFAULT_MAX_STEPS  = 3;
@@ -99,7 +100,7 @@ function computeMirrorState(spins, mirrorMode = 'color') {
       isActive: false, status: 'WAITING',
       reason: `Esperando completar ventana de ${MIRROR_WINDOW} números (faltan ${MIRROR_WINDOW - spins.length})`,
       selectedMode: mirrorMode,
-      lossStreak: 0,
+      lossStreak: 0, watchLosses: 0,
       cyclesCompleted: 0, cyclesAborted: 0,
     };
   }
@@ -109,6 +110,8 @@ function computeMirrorState(spins, mirrorMode = 'color') {
   let blockedUntil      = -1;
   let cyclesCompleted   = 0;
   let cyclesAborted     = 0;
+  let watching          = true;  // fase de observación
+  let watchLosses       = 0;     // fallos observados consecutivos
 
   for (let i = MIRROR_WINDOW; i < spins.length; i++) {
     if (i <= blockedUntil) continue;
@@ -119,19 +122,37 @@ function computeMirrorState(spins, mirrorMode = 'color') {
 
     const isWin = evalSpin(spins[i], bet, mirrorMode);
 
-    if (isWin) {
-      cyclesCompleted++;
-      consecutiveLosses = 0;
-      stepIdx           = 0;
+    if (watching) {
+      if (!isWin) {
+        watchLosses++;
+        if (watchLosses >= MIN_WATCH_LOSSES) {
+          watching          = false;
+          watchLosses       = 0;
+          consecutiveLosses = 0;
+          stepIdx           = 0;
+        }
+      } else {
+        watchLosses = 0;
+      }
     } else {
-      consecutiveLosses++;
-      if (consecutiveLosses >= MIN_LOSS_STREAK) {
-        cyclesAborted++;
-        blockedUntil      = i + BLOCK_SPINS;
+      if (isWin) {
+        cyclesCompleted++;
         consecutiveLosses = 0;
         stepIdx           = 0;
+        watching          = true;
+        watchLosses       = 0;
       } else {
-        stepIdx = Math.min(stepIdx + 1, MIRROR_PROGRESSION.length - 1);
+        consecutiveLosses++;
+        if (consecutiveLosses >= MIN_LOSS_STREAK) {
+          cyclesAborted++;
+          blockedUntil      = i + BLOCK_SPINS;
+          watching          = true;
+          watchLosses       = 0;
+          consecutiveLosses = 0;
+          stepIdx           = 0;
+        } else {
+          stepIdx = Math.min(stepIdx + 1, MIRROR_PROGRESSION.length - 1);
+        }
       }
     }
   }
@@ -142,32 +163,41 @@ function computeMirrorState(spins, mirrorMode = 'color') {
   const cur        = MIRROR_PROGRESSION[Math.min(stepIdx, MIRROR_PROGRESSION.length - 1)];
   const next       = MIRROR_PROGRESSION[Math.min(stepIdx + 1, MIRROR_PROGRESSION.length - 1)];
 
-  // Debug log
-  console.log(
-    `[ESPEJO] Window: [${spins.slice(-MIRROR_WINDOW).map(s => s.number).join(', ')}]\n` +
-    `  Reference number: ${ref.refNumber ?? '—'}\n` +
-    `  Reference type:   ${ref.refLabel  ?? '—'}\n` +
-    `  Next bet:         ${lastIdx > 0 && lastIdx <= blockedUntil ? 'BLOQUEADO' : (ref.betLabel ?? '—')}\n` +
-    `  Loss streak:      ${consecutiveLosses}\n` +
-    `  Cycle paused:     ${lastIdx > 0 && lastIdx <= blockedUntil}`
-  );
-
   // BLOQUEADO
   if (lastIdx > 0 && lastIdx <= blockedUntil) {
     const spinsRemaining = blockedUntil - lastIdx;
+    console.log(`[ESPEJO] BLOQUEADO · ${spinsRemaining} tiradas restantes`);
     return {
       isActive: false, status: 'BLOCKED',
-      reason: `3 pérdidas consecutivas — bloqueado (${spinsRemaining} tiradas restantes)`,
+      reason: `3 pérdidas apostadas — bloqueado (${spinsRemaining} tiradas restantes)`,
       selectedMode: mirrorMode,
-      lossStreak: MIN_LOSS_STREAK,
+      lossStreak: MIN_LOSS_STREAK, watchLosses: 0,
       currentStep: 1, chips: MIRROR_PROGRESSION[0].chips,
       cyclesCompleted, cyclesAborted, spinsRemaining,
       ...ref,
     };
   }
 
+  // OBSERVANDO
+  if (watching) {
+    console.log(`[ESPEJO] WATCHING · watchLosses=${watchLosses}/${MIN_WATCH_LOSSES} · bet-would-be=${currentBet ?? '—'}`);
+    return {
+      isActive: false, status: 'WATCHING',
+      reason: watchLosses > 0
+        ? `Observando · ${watchLosses}/${MIN_WATCH_LOSSES} fallos → activa al ${MIN_WATCH_LOSSES}°`
+        : 'Observando — esperando 3 fallos consecutivos para activar',
+      selectedMode: mirrorMode,
+      currentBet,
+      lossStreak: watchLosses, watchLosses,
+      currentStep: 1, chips: MIRROR_PROGRESSION[0].chips,
+      cyclesCompleted, cyclesAborted,
+      ...ref,
+    };
+  }
+
   // ACTIVO
   const isLastStep = consecutiveLosses >= MIN_LOSS_STREAK - 1;
+  console.log(`[ESPEJO] ACTIVE · paso=${cur.step} · bet=${currentBet ?? '—'} · losses=${consecutiveLosses}`);
   return {
     isActive: true, status: 'ACTIVE',
     reason: ref.refNumber !== null
@@ -175,14 +205,14 @@ function computeMirrorState(spins, mirrorMode = 'color') {
       : 'Ventana de 10 activa',
     selectedMode: mirrorMode,
     currentBet,
-    lossStreak: consecutiveLosses,
+    lossStreak: consecutiveLosses, watchLosses: 0,
     currentStep:  cur.step,
     totalSteps:   MIN_LOSS_STREAK,
     chips:        cur.chips,
     isLastStep,
     cyclesCompleted, cyclesAborted,
     ...ref,
-    onWin:  'Ganar → reiniciar paso 1',
+    onWin:  'Ganar → volver a observar',
     onLoss: isLastStep
       ? `STOP — bloqueo ${BLOCK_SPINS} tiradas`
       : `Pérdida ${consecutiveLosses + 1}/${MIN_LOSS_STREAK} → paso ${cur.step + 1} · ${next.chips}f`,

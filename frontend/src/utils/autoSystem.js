@@ -171,7 +171,8 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
 
     if (ls === 'ESPEJO') {
       const mState = lm ? (mirrorStates[lm] || computeMirrorState(spins, lm)) : null;
-      stillCycling = mState ? mState.status !== 'WAITING' : false;
+      // Lock stays active while ACTIVE or BLOCKED; WATCHING = between cycles = can re-score
+      stillCycling = mState ? mState.status === 'ACTIVE' || mState.status === 'BLOCKED' : false;
       lockReason   = mState?.reason ?? '';
     } else if (ls === 'JACOBO') {
       stillCycling = jacoboState.isActive;

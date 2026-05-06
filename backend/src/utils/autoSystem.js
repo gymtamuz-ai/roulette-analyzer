@@ -122,7 +122,7 @@ function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedS
 
     if (ls === 'ESPEJO') {
       const mState = lm ? (mirrorStates[lm] || computeMirrorState(spins, lm)) : null;
-      stillCycling = mState ? mState.status !== 'WAITING' : false;
+      stillCycling = mState ? mState.status === 'ACTIVE' || mState.status === 'BLOCKED' : false;
     } else if (ls === 'JACOBO') {
       stillCycling = jacoboState.isActive;
     } else if (ls === 'SECTORES') {
