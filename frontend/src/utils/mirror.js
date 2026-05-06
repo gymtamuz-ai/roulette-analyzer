@@ -1,23 +1,22 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SISTEMA ESPEJO PRO — ventana 10, activación por racha, ciclo dinámico
+// SISTEMA ESPEJO — ventana deslizante de 10, referencia = PRIMER número
 //
 // Lógica:
-//   1. Requiere >= 10 tiradas previas
-//   2. NO apuesta siempre — solo activa cuando lossStreak >= 3
-//   3. Progresión 10 pasos (extendida) cuando hay racha confirmada
-//   4. Bloquea 10 tiradas si se agota el ciclo máximo
+//   1. Espera 10 tiradas para formar la ventana inicial
+//   2. Apuesta SIEMPRE el espejo del PRIMER número de la ventana
+//   3. La ventana se desplaza de a 1 con cada nuevo spin
+//   4. Bloquea 10 tiradas si se acumulan 3 pérdidas consecutivas
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
-export const MIRROR_WINDOW        = 10;   // tiradas mínimas para activar
-export const MIN_LOSS_STREAK      = 3;    // racha mínima para activar
-export const NOISE_THRESHOLD      = 0.70; // tasa de alternancia → patrón ruidoso
-export const BLOCK_SPINS          = 10;   // tiradas bloqueadas tras ciclo agotado
-export const EXTENDED_MAX_STEPS   = 10;   // pasos cuando hay racha confirmada
-export const DEFAULT_MAX_STEPS    = 6;    // pasos sin racha (estado de espera)
+export const MIRROR_WINDOW      = 10;  // tamaño de la ventana
+export const MIN_LOSS_STREAK    = 3;   // pérdidas consecutivas → bloqueo
+export const BLOCK_SPINS        = 10;  // tiradas bloqueadas tras 3 pérdidas
+export const EXTENDED_MAX_STEPS = 10;  // pasos disponibles en la progresión
+export const DEFAULT_MAX_STEPS  = 3;   // máximo antes de bloqueo
+export const NOISE_THRESHOLD    = 0.70; // legacy (no usado en nueva lógica)
 
-// ─── Progresión completa (martingala, 10 pasos) ───────────────────────────────
-// Chance simple paga 1:1. Cada paso dobla → recupera todo + 1 chip de ganancia.
+// ─── Progresión (martingala, hasta 10 pasos disponibles) ─────────────────────
 export const MIRROR_PROGRESSION = [
   { step: 1,  chips: 1   },
   { step: 2,  chips: 2   },
@@ -31,7 +30,7 @@ export const MIRROR_PROGRESSION = [
   { step: 10, chips: 512 },
 ];
 
-// ─── Inversores por categoría ─────────────────────────────────────────────────
+// ─── Inversores ───────────────────────────────────────────────────────────────
 export function mirrorColor(v)  { return v === 'red'  ? 'black' : v === 'black' ? 'red'  : null; }
 export function mirrorParity(v) { return v === 'even' ? 'odd'   : v === 'odd'   ? 'even' : null; }
 export function mirrorRange(v)  { return v === 'low'  ? 'high'  : v === 'high'  ? 'low'  : null; }
@@ -58,14 +57,51 @@ function mirrorValue(v, mode) {
   return null;
 }
 
+// ─── Etiquetas para debug ─────────────────────────────────────────────────────
+function valueLabel(v, mode) {
+  if (!v) return '?';
+  if (mode === 'range')  return v === 'low'  ? 'MENOR' : 'MAYOR';
+  if (mode === 'color')  return v === 'red'  ? 'ROJO'  : 'NEGRO';
+  if (mode === 'parity') return v === 'even' ? 'PAR'   : 'IMPAR';
+  return v;
+}
+
+// ─── Secuencia visual de la ventana ──────────────────────────────────────────
+export function getSequence(spins, mode) {
+  return spins.slice(-MIRROR_WINDOW).map(s => valueForMode(s, mode));
+}
+
+// ─── NUEVO: apuesta = espejo del PRIMER número de la ventana de 10 ────────────
+//   Anterior: leía el ÚLTIMO valor del historial completo (incorrecto).
+//   Nuevo:    lee el PRIMERO de spins.slice(-MIRROR_WINDOW) (correcto).
 function getCurrentBet(spins, mode) {
-  for (let i = spins.length - 1; i >= 0; i--) {
-    const v = valueForMode(spins[i], mode);
+  const window = spins.slice(-MIRROR_WINDOW);
+  for (let i = 0; i < window.length; i++) {
+    const v = valueForMode(window[i], mode);
     if (v !== null) return mirrorValue(v, mode);
   }
   return null;
 }
 
+// ─── Info de referencia (primer elemento válido de la ventana) ────────────────
+function getRefInfo(spins, mode) {
+  const window = spins.slice(-MIRROR_WINDOW);
+  for (let i = 0; i < window.length; i++) {
+    const v = valueForMode(window[i], mode);
+    if (v !== null) {
+      return {
+        refNumber: window[i].number,
+        refValue:  v,
+        refLabel:  valueLabel(v, mode),
+        bet:       mirrorValue(v, mode),
+        betLabel:  valueLabel(mirrorValue(v, mode), mode),
+      };
+    }
+  }
+  return { refNumber: null, refValue: null, refLabel: null, bet: null, betLabel: null };
+}
+
+// ─── Evaluación de resultado ──────────────────────────────────────────────────
 function evalSpin(spin, bet, mode) {
   if (!bet) return false;
   if (mode === 'color')  return spin.color  === bet;
@@ -74,75 +110,32 @@ function evalSpin(spin, bet, mode) {
   return false;
 }
 
-// ─── Secuencia visual de las últimas N tiradas ───────────────────────────────
-export function getSequence(spins, mode) {
-  return spins.slice(-MIRROR_WINDOW).map(s => valueForMode(s, mode));
-}
-
-// ─── Racha de pérdidas consecutivas del espejo ────────────────────────────────
-// = cuántas veces seguidas cayó el MISMO valor al final del historial.
-// Si las últimas 4 tiradas son R R R R:
-//   - después de R1 apostamos N → R2 cae → PÉRDIDA 1
-//   - después de R2 apostamos N → R3 cae → PÉRDIDA 2
-//   - después de R3 apostamos N → R4 cae → PÉRDIDA 3
-//   - lossStreak = streak(4) - 1 = 3
+// ─── Legacy: racha de valores consecutivos iguales (usado en scoring externo) ─
 export function computeLossStreak(spins, mode) {
-  let streakValue = null;
-  let streak      = 0;
+  let streakValue = null, streak = 0;
   for (let i = spins.length - 1; i >= 0; i--) {
     const v = valueForMode(spins[i], mode);
-    if (v === null) continue;                       // ignorar ceros/nulos
-    if (streakValue === null)  { streakValue = v; streak = 1; }
+    if (v === null) continue;
+    if (streakValue === null)   { streakValue = v; streak = 1; }
     else if (v === streakValue) { streak++; }
     else                        { break; }
   }
   return Math.max(0, streak - 1);
 }
 
-// ─── Detección de patrón ruidoso (muy alternado) ─────────────────────────────
-function computeIsNoisy(spins, mode) {
-  const vals = spins.slice(-MIRROR_WINDOW)
-    .map(s => valueForMode(s, mode))
-    .filter(v => v !== null);
-  if (vals.length < 4) return false;
-  let alt = 0;
-  for (let i = 1; i < vals.length; i++) if (vals[i] !== vals[i - 1]) alt++;
-  return (alt / (vals.length - 1)) > NOISE_THRESHOLD;
-}
-
-// ─── Función de activación inteligente ───────────────────────────────────────
+// ─── Activación (simplificada: solo necesita ventana completa) ────────────────
 export function shouldActivateMirror(spins, mode) {
   if (spins.length < MIRROR_WINDOW) {
     return {
       shouldActivate: false,
-      reason: `Esperando ${MIRROR_WINDOW - spins.length} tiradas más`,
+      reason: `Esperando ${MIRROR_WINDOW - spins.length} tirada${MIRROR_WINDOW - spins.length !== 1 ? 's' : ''} más`,
       lossStreak: 0,
     };
   }
-
-  const lossStreak = computeLossStreak(spins, mode);
-  const isNoisy    = computeIsNoisy(spins, mode);
-
-  if (isNoisy) {
-    return {
-      shouldActivate: false,
-      reason: `Patrón alternado — sin racha clara (${lossStreak}/${MIN_LOSS_STREAK})`,
-      lossStreak,
-    };
-  }
-
-  if (lossStreak < MIN_LOSS_STREAK) {
-    return {
-      shouldActivate: false,
-      reason: `Esperando racha: ${lossStreak}/${MIN_LOSS_STREAK} repeticiones`,
-      lossStreak,
-    };
-  }
-
   return {
     shouldActivate: true,
-    reason: `Racha detectada: ${lossStreak} repetición${lossStreak !== 1 ? 'es' : ''}`,
-    lossStreak,
+    reason: 'Ventana de 10 completa — sistema activo',
+    lossStreak: 0,
     maxSteps: EXTENDED_MAX_STEPS,
   };
 }
@@ -151,151 +144,119 @@ export function shouldActivateMirror(spins, mode) {
 export function computeMirrorState(spins, mirrorMode = 'color') {
   if (!spins) spins = [];
 
-  // Sin suficiente historia
+  // ── Sin ventana completa ──
   if (spins.length < MIRROR_WINDOW) {
     return {
       isActive: false, status: 'WAITING',
-      reason: `Esperando ${MIRROR_WINDOW - spins.length} tirada${MIRROR_WINDOW - spins.length !== 1 ? 's' : ''} más`,
+      reason: `Esperando completar ventana de ${MIRROR_WINDOW} números (faltan ${MIRROR_WINDOW - spins.length})`,
       selectedMode: mirrorMode,
-      lossStreak: computeLossStreak(spins, mirrorMode),
+      lossStreak: 0,
       sequence: getSequence(spins, mirrorMode),
+      invertedSequence: [],
       cyclesCompleted: 0, cyclesAborted: 0,
     };
   }
 
-  let stepIdx             = 0;
-  let cycleActive         = false;
-  let cycleMaxSteps       = DEFAULT_MAX_STEPS;
-  let blockedUntil        = -1;
-  let cyclesCompleted     = 0;
-  let cyclesAborted       = 0;
-  let currentCycleHistory = [];
+  // ── Replay determinístico ──
+  let stepIdx           = 0;   // índice en MIRROR_PROGRESSION
+  let consecutiveLosses = 0;   // pérdidas consecutivas de apuesta
+  let blockedUntil      = -1;  // índice hasta el que estamos bloqueados
+  let cyclesCompleted   = 0;   // veces que ganamos (reseteamos a paso 1)
+  let cyclesAborted     = 0;   // veces que llegamos a 3 pérdidas seguidas
 
-  // ── Replay ──
   for (let i = MIRROR_WINDOW; i < spins.length; i++) {
-    // Bloqueado → saltar
+    // En período de bloqueo → saltar
     if (i <= blockedUntil) continue;
 
     const prevSpins = spins.slice(0, i);
-
-    // Si no estamos en ciclo, comprobar activación
-    if (!cycleActive) {
-      const act = shouldActivateMirror(prevSpins, mirrorMode);
-      if (!act.shouldActivate) continue;
-      cycleActive   = true;
-      cycleMaxSteps = act.maxSteps ?? DEFAULT_MAX_STEPS;
-    }
-
-    // ─ En ciclo: evaluar apuesta ─
-    const step = MIRROR_PROGRESSION[stepIdx];
-    if (!step) continue;
-
     const bet = getCurrentBet(prevSpins, mirrorMode);
     if (!bet) continue;
 
-    const isWin  = evalSpin(spins[i], bet, mirrorMode);
-    const profit = isWin ? step.chips : -step.chips;
-
-    currentCycleHistory.push({
-      step: step.step, chips: step.chips,
-      bet, isWin, result: isWin ? 'win' : 'loss',
-      number: spins[i].number, profit,
-    });
+    const step  = MIRROR_PROGRESSION[Math.min(stepIdx, MIRROR_PROGRESSION.length - 1)];
+    const isWin = evalSpin(spins[i], bet, mirrorMode);
 
     if (isWin) {
       cyclesCompleted++;
-      cycleActive         = false;
-      stepIdx             = 0;
-      currentCycleHistory = [];
-    } else if (stepIdx >= cycleMaxSteps - 1) {
-      // Ciclo agotado → bloquear
-      cyclesAborted++;
-      cycleActive         = false;
-      stepIdx             = 0;
-      currentCycleHistory = [];
-      blockedUntil        = i + BLOCK_SPINS;
+      consecutiveLosses = 0;
+      stepIdx           = 0;    // ganar → volver a paso 1
     } else {
-      stepIdx++;
+      consecutiveLosses++;
+      if (consecutiveLosses >= MIN_LOSS_STREAK) {
+        // 3 pérdidas consecutivas → bloquear
+        cyclesAborted++;
+        blockedUntil      = i + BLOCK_SPINS;
+        consecutiveLosses = 0;
+        stepIdx           = 0;  // reiniciar desde paso 1 al salir del bloqueo
+      } else {
+        stepIdx = Math.min(stepIdx + 1, MIRROR_PROGRESSION.length - 1);
+      }
     }
   }
 
-  // ── Determinar estado actual ──
+  // ── Estado actual ──
   const lastIdx    = spins.length - 1;
   const sequence   = getSequence(spins, mirrorMode);
   const inverted   = sequence.map(v => mirrorValue(v, mirrorMode));
   const currentBet = getCurrentBet(spins, mirrorMode);
+  const ref        = getRefInfo(spins, mirrorMode);
+  const cur        = MIRROR_PROGRESSION[Math.min(stepIdx, MIRROR_PROGRESSION.length - 1)];
+  const next       = MIRROR_PROGRESSION[Math.min(stepIdx + 1, MIRROR_PROGRESSION.length - 1)];
 
-  // BLOQUEADO
+  // ── BLOQUEADO ──
   if (lastIdx > 0 && lastIdx <= blockedUntil) {
     const spinsRemaining = blockedUntil - lastIdx;
+    console.log(
+      `[ESPEJO] Window: [${spins.slice(-MIRROR_WINDOW).map(s => s.number).join(', ')}]\n` +
+      `  Reference number: ${ref.refNumber ?? '—'}\n` +
+      `  Reference type:   ${ref.refLabel  ?? '—'}\n` +
+      `  Next bet:         BLOQUEADO\n` +
+      `  Loss streak:      ${MIN_LOSS_STREAK}\n` +
+      `  Cycle paused:     true (${spinsRemaining} tiradas restantes)`
+    );
     return {
       isActive: false, status: 'BLOCKED',
-      reason: `Bloqueado: ciclo máximo agotado (${spinsRemaining} tiradas restantes)`,
+      reason: `3 pérdidas consecutivas — bloqueado (${spinsRemaining} tiradas restantes)`,
       selectedMode: mirrorMode,
-      lossStreak: computeLossStreak(spins, mirrorMode),
-      currentStep: MIRROR_PROGRESSION[stepIdx]?.step ?? 1,
-      chips:       MIRROR_PROGRESSION[stepIdx]?.chips ?? 1,
+      lossStreak: MIN_LOSS_STREAK,
+      currentStep: 1, chips: MIRROR_PROGRESSION[0].chips,
       cyclesCompleted, cyclesAborted, spinsRemaining,
       sequence, invertedSequence: inverted,
+      ...ref,
     };
   }
 
-  // ACTIVO — dentro de un ciclo iniciado en el replay
-  if (cycleActive) {
-    const cur  = MIRROR_PROGRESSION[stepIdx];
-    const next = MIRROR_PROGRESSION[stepIdx + 1];
-    const act  = shouldActivateMirror(spins, mirrorMode);
-    return {
-      isActive: true, status: 'ACTIVE',
-      reason: act.reason,
-      selectedMode: mirrorMode,
-      currentBet, lossStreak: act.lossStreak,
-      currentStep: cur.step, totalSteps: cycleMaxSteps,
-      chips: cur.chips,
-      isLastStep: stepIdx >= cycleMaxSteps - 1,
-      cyclesCompleted, cyclesAborted,
-      currentCycleHistory: currentCycleHistory.slice(-10),
-      sequence, invertedSequence: inverted,
-      onWin:  'Reiniciar → paso 1',
-      onLoss: stepIdx >= cycleMaxSteps - 1
-        ? 'STOP — bloqueo 10 tiradas'
-        : `Paso ${cur.step + 1} · ${next?.chips}f`,
-    };
-  }
+  // ── ACTIVO ──
+  const isLastStep = consecutiveLosses >= MIN_LOSS_STREAK - 1;
 
-  // ── Evaluar activación actual ──
-  const activation = shouldActivateMirror(spins, mirrorMode);
+  console.log(
+    `[ESPEJO] Window: [${spins.slice(-MIRROR_WINDOW).map(s => s.number).join(', ')}]\n` +
+    `  Reference number: ${ref.refNumber ?? '—'}\n` +
+    `  Reference type:   ${ref.refLabel  ?? '—'}\n` +
+    `  Next bet:         ${ref.betLabel  ?? '—'} (${currentBet ?? '—'})\n` +
+    `  Loss streak:      ${consecutiveLosses}\n` +
+    `  Cycle paused:     false`
+  );
 
-  // ACTIVO — condición cumplida, primera apuesta del nuevo ciclo
-  if (activation.shouldActivate) {
-    const cur  = MIRROR_PROGRESSION[0];
-    const next = MIRROR_PROGRESSION[1];
-    return {
-      isActive: true, status: 'ACTIVE',
-      reason: activation.reason,
-      selectedMode: mirrorMode,
-      currentBet, lossStreak: activation.lossStreak,
-      currentStep: cur.step, totalSteps: activation.maxSteps,
-      chips: cur.chips,
-      isLastStep: false,
-      cyclesCompleted, cyclesAborted,
-      currentCycleHistory: [],
-      sequence, invertedSequence: inverted,
-      onWin:  'Reiniciar → paso 1',
-      onLoss: `Paso 2 · ${next?.chips}f`,
-    };
-  }
-
-  // ESPERANDO
   return {
-    isActive: false, status: 'WAITING',
-    reason: activation.reason,
+    isActive: true, status: 'ACTIVE',
+    reason: ref.refNumber !== null
+      ? `Ref: ${ref.refNumber} → ${ref.refLabel} → apostar ${ref.betLabel}`
+      : 'Ventana de 10 activa',
     selectedMode: mirrorMode,
-    lossStreak: activation.lossStreak,
-    currentStep: MIRROR_PROGRESSION[0].step,
-    chips:       MIRROR_PROGRESSION[0].chips,
+    currentBet,
+    lossStreak: consecutiveLosses,
+    currentStep:  cur.step,
+    totalSteps:   MIN_LOSS_STREAK,   // máximo 3 pérdidas antes del bloqueo
+    chips:        cur.chips,
+    isLastStep,
     cyclesCompleted, cyclesAborted,
+    currentCycleHistory: [],
     sequence, invertedSequence: inverted,
+    ...ref,
+    onWin:  'Ganar → reiniciar paso 1',
+    onLoss: isLastStep
+      ? `STOP — bloqueo ${BLOCK_SPINS} tiradas`
+      : `Pérdida ${consecutiveLosses + 1}/${MIN_LOSS_STREAK} → paso ${cur.step + 1} · ${next.chips}f`,
   };
 }
 

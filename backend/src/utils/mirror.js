@@ -1,13 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// SISTEMA ESPEJO PRO — Backend (idéntico al frontend, CommonJS)
+// SISTEMA ESPEJO — Backend (CommonJS)
+// ventana deslizante de 10, referencia = PRIMER número
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const MIRROR_WINDOW       = 10;
-const MIN_LOSS_STREAK     = 3;
-const NOISE_THRESHOLD     = 0.70;
-const BLOCK_SPINS         = 10;
-const EXTENDED_MAX_STEPS  = 10;
-const DEFAULT_MAX_STEPS   = 6;
+const MIRROR_WINDOW      = 10;
+const MIN_LOSS_STREAK    = 3;
+const BLOCK_SPINS        = 10;
+const EXTENDED_MAX_STEPS = 10;
+const DEFAULT_MAX_STEPS  = 3;
 
 const MIRROR_PROGRESSION = [
   { step: 1,  chips: 1   },
@@ -47,12 +47,39 @@ function mirrorValue(v, mode) {
   return null;
 }
 
+function valueLabel(v, mode) {
+  if (!v) return '?';
+  if (mode === 'range')  return v === 'low'  ? 'MENOR' : 'MAYOR';
+  if (mode === 'color')  return v === 'red'  ? 'ROJO'  : 'NEGRO';
+  if (mode === 'parity') return v === 'even' ? 'PAR'   : 'IMPAR';
+  return v;
+}
+
+// ─── NUEVO: apuesta = espejo del PRIMER número de la ventana de 10 ────────────
 function getCurrentBet(spins, mode) {
-  for (let i = spins.length - 1; i >= 0; i--) {
-    const v = valueForMode(spins[i], mode);
+  const window = spins.slice(-MIRROR_WINDOW);
+  for (let i = 0; i < window.length; i++) {
+    const v = valueForMode(window[i], mode);
     if (v !== null) return mirrorValue(v, mode);
   }
   return null;
+}
+
+function getRefInfo(spins, mode) {
+  const window = spins.slice(-MIRROR_WINDOW);
+  for (let i = 0; i < window.length; i++) {
+    const v = valueForMode(window[i], mode);
+    if (v !== null) {
+      return {
+        refNumber: window[i].number,
+        refValue:  v,
+        refLabel:  valueLabel(v, mode),
+        bet:       mirrorValue(v, mode),
+        betLabel:  valueLabel(mirrorValue(v, mode), mode),
+      };
+    }
+  }
+  return { refNumber: null, refValue: null, refLabel: null, bet: null, betLabel: null };
 }
 
 function evalSpin(spin, bet, mode) {
@@ -63,150 +90,102 @@ function evalSpin(spin, bet, mode) {
   return false;
 }
 
-function computeLossStreak(spins, mode) {
-  let streakValue = null, streak = 0;
-  for (let i = spins.length - 1; i >= 0; i--) {
-    const v = valueForMode(spins[i], mode);
-    if (v === null) continue;
-    if (streakValue === null)   { streakValue = v; streak = 1; }
-    else if (v === streakValue) { streak++; }
-    else                        { break; }
-  }
-  return Math.max(0, streak - 1);
-}
-
-function computeIsNoisy(spins, mode) {
-  const vals = spins.slice(-MIRROR_WINDOW)
-    .map(s => valueForMode(s, mode))
-    .filter(v => v !== null);
-  if (vals.length < 4) return false;
-  let alt = 0;
-  for (let i = 1; i < vals.length; i++) if (vals[i] !== vals[i - 1]) alt++;
-  return (alt / (vals.length - 1)) > NOISE_THRESHOLD;
-}
-
-function shouldActivateMirror(spins, mode) {
-  if (spins.length < MIRROR_WINDOW) {
-    return { shouldActivate: false, reason: 'Datos insuficientes', lossStreak: 0 };
-  }
-  const lossStreak = computeLossStreak(spins, mode);
-  const isNoisy    = computeIsNoisy(spins, mode);
-  if (isNoisy) return { shouldActivate: false, reason: 'Patrón alternado', lossStreak };
-  if (lossStreak < MIN_LOSS_STREAK) {
-    return { shouldActivate: false, reason: `Racha ${lossStreak}/${MIN_LOSS_STREAK}`, lossStreak };
-  }
-  return {
-    shouldActivate: true,
-    reason: `Racha: ${lossStreak} repeticiones`,
-    lossStreak,
-    maxSteps: EXTENDED_MAX_STEPS,
-  };
-}
-
 // ─── Motor de estado ──────────────────────────────────────────────────────────
 function computeMirrorState(spins, mirrorMode = 'color') {
   if (!spins) spins = [];
 
   if (spins.length < MIRROR_WINDOW) {
-    return { isActive: false, status: 'WAITING', selectedMode: mirrorMode };
+    return {
+      isActive: false, status: 'WAITING',
+      reason: `Esperando completar ventana de ${MIRROR_WINDOW} números (faltan ${MIRROR_WINDOW - spins.length})`,
+      selectedMode: mirrorMode,
+      lossStreak: 0,
+      cyclesCompleted: 0, cyclesAborted: 0,
+    };
   }
 
-  let stepIdx         = 0;
-  let cycleActive     = false;
-  let cycleMaxSteps   = DEFAULT_MAX_STEPS;
-  let blockedUntil    = -1;
-  let cyclesCompleted = 0;
-  let cyclesAborted   = 0;
+  let stepIdx           = 0;
+  let consecutiveLosses = 0;
+  let blockedUntil      = -1;
+  let cyclesCompleted   = 0;
+  let cyclesAborted     = 0;
 
   for (let i = MIRROR_WINDOW; i < spins.length; i++) {
     if (i <= blockedUntil) continue;
 
     const prevSpins = spins.slice(0, i);
-
-    if (!cycleActive) {
-      const act = shouldActivateMirror(prevSpins, mirrorMode);
-      if (!act.shouldActivate) continue;
-      cycleActive   = true;
-      cycleMaxSteps = act.maxSteps ?? DEFAULT_MAX_STEPS;
-    }
-
-    const step = MIRROR_PROGRESSION[stepIdx];
-    if (!step) continue;
-
-    const bet   = getCurrentBet(prevSpins, mirrorMode);
+    const bet = getCurrentBet(prevSpins, mirrorMode);
     if (!bet) continue;
 
     const isWin = evalSpin(spins[i], bet, mirrorMode);
 
     if (isWin) {
       cyclesCompleted++;
-      cycleActive = false; stepIdx = 0;
-    } else if (stepIdx >= cycleMaxSteps - 1) {
-      cyclesAborted++;
-      cycleActive = false; stepIdx = 0;
-      blockedUntil = i + BLOCK_SPINS;
+      consecutiveLosses = 0;
+      stepIdx           = 0;
     } else {
-      stepIdx++;
+      consecutiveLosses++;
+      if (consecutiveLosses >= MIN_LOSS_STREAK) {
+        cyclesAborted++;
+        blockedUntil      = i + BLOCK_SPINS;
+        consecutiveLosses = 0;
+        stepIdx           = 0;
+      } else {
+        stepIdx = Math.min(stepIdx + 1, MIRROR_PROGRESSION.length - 1);
+      }
     }
   }
 
   const lastIdx    = spins.length - 1;
   const currentBet = getCurrentBet(spins, mirrorMode);
+  const ref        = getRefInfo(spins, mirrorMode);
+  const cur        = MIRROR_PROGRESSION[Math.min(stepIdx, MIRROR_PROGRESSION.length - 1)];
+  const next       = MIRROR_PROGRESSION[Math.min(stepIdx + 1, MIRROR_PROGRESSION.length - 1)];
+
+  // Debug log
+  console.log(
+    `[ESPEJO] Window: [${spins.slice(-MIRROR_WINDOW).map(s => s.number).join(', ')}]\n` +
+    `  Reference number: ${ref.refNumber ?? '—'}\n` +
+    `  Reference type:   ${ref.refLabel  ?? '—'}\n` +
+    `  Next bet:         ${lastIdx > 0 && lastIdx <= blockedUntil ? 'BLOQUEADO' : (ref.betLabel ?? '—')}\n` +
+    `  Loss streak:      ${consecutiveLosses}\n` +
+    `  Cycle paused:     ${lastIdx > 0 && lastIdx <= blockedUntil}`
+  );
 
   // BLOQUEADO
   if (lastIdx > 0 && lastIdx <= blockedUntil) {
     const spinsRemaining = blockedUntil - lastIdx;
     return {
       isActive: false, status: 'BLOCKED',
-      reason: `Bloqueado: ciclo máximo agotado (${spinsRemaining} tiradas restantes)`,
+      reason: `3 pérdidas consecutivas — bloqueado (${spinsRemaining} tiradas restantes)`,
       selectedMode: mirrorMode,
-      lossStreak: computeLossStreak(spins, mirrorMode),
-      currentStep: MIRROR_PROGRESSION[stepIdx]?.step ?? 1,
-      chips:       MIRROR_PROGRESSION[stepIdx]?.chips ?? 1,
+      lossStreak: MIN_LOSS_STREAK,
+      currentStep: 1, chips: MIRROR_PROGRESSION[0].chips,
       cyclesCompleted, cyclesAborted, spinsRemaining,
+      ...ref,
     };
   }
 
-  // ACTIVO — en ciclo
-  if (cycleActive) {
-    const cur = MIRROR_PROGRESSION[stepIdx];
-    const act = shouldActivateMirror(spins, mirrorMode);
-    return {
-      isActive: true, status: 'ACTIVE',
-      reason: act.reason,
-      selectedMode: mirrorMode,
-      currentBet, lossStreak: act.lossStreak,
-      currentStep: cur.step,
-      chips: cur.chips, totalSteps: cycleMaxSteps,
-      isLastStep: stepIdx >= cycleMaxSteps - 1,
-      cyclesCompleted, cyclesAborted,
-    };
-  }
-
-  // Evaluar activación actual
-  const activation = shouldActivateMirror(spins, mirrorMode);
-  if (activation.shouldActivate) {
-    return {
-      isActive: true, status: 'ACTIVE',
-      reason: activation.reason,
-      selectedMode: mirrorMode,
-      currentBet, lossStreak: activation.lossStreak,
-      currentStep: 1,
-      chips: MIRROR_PROGRESSION[0].chips,
-      totalSteps: activation.maxSteps,
-      isLastStep: false,
-      cyclesCompleted, cyclesAborted,
-    };
-  }
-
-  // ESPERANDO
+  // ACTIVO
+  const isLastStep = consecutiveLosses >= MIN_LOSS_STREAK - 1;
   return {
-    isActive: false, status: 'WAITING',
-    reason: activation.reason,
+    isActive: true, status: 'ACTIVE',
+    reason: ref.refNumber !== null
+      ? `Ref: ${ref.refNumber} → ${ref.refLabel} → apostar ${ref.betLabel}`
+      : 'Ventana de 10 activa',
     selectedMode: mirrorMode,
-    lossStreak: activation.lossStreak,
-    currentStep: 1, chips: 1,
+    currentBet,
+    lossStreak: consecutiveLosses,
+    currentStep:  cur.step,
+    totalSteps:   MIN_LOSS_STREAK,
+    chips:        cur.chips,
+    isLastStep,
     cyclesCompleted, cyclesAborted,
+    ...ref,
+    onWin:  'Ganar → reiniciar paso 1',
+    onLoss: isLastStep
+      ? `STOP — bloqueo ${BLOCK_SPINS} tiradas`
+      : `Pérdida ${consecutiveLosses + 1}/${MIN_LOSS_STREAK} → paso ${cur.step + 1} · ${next.chips}f`,
   };
 }
 
