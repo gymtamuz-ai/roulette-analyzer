@@ -1,6 +1,7 @@
 import { getSectorStreets, PRE_ANALYSIS_WINDOW, PROGRESSION_TABLES } from '../utils/roulette';
-import JacoboPanel  from './JacoboPanel';
-import MirrorPanel  from './MirrorPanel';
+import JacoboPanel   from './JacoboPanel';
+import MirrorPanel   from './MirrorPanel';
+import VecinosPanel  from './VecinosPanel';
 import AutoModePanel from './AutoModePanel';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ function ModeTab({ label, active, onClick, color = 'blue' }) {
     yellow: 'bg-yellow-700 text-white border-yellow-500',
     cyan:   'bg-cyan-700 text-white border-cyan-500',
     orange: 'bg-orange-700 text-white border-orange-500',
+    green:  'bg-green-700 text-white border-green-500',
   };
   return (
     <button onClick={onClick}
@@ -72,7 +74,7 @@ export default function BettingPanel({
   // Sectors mode
   bettingState, passTarget, onPassTargetChange, systemOverride, onSystemOverride,
   // Individual systems
-  jacoboState, mirrorState,
+  jacoboState, mirrorState, vecinosState,
   // Auto mode
   autoSystemState,
   // Mode control
@@ -85,6 +87,7 @@ export default function BettingPanel({
       <ModeTab label="🎯 Sectores" active={bettingMode === 'sectors'} onClick={() => onBettingModeChange('sectors')} color="blue"   />
       <ModeTab label="⚡ Jacobo"   active={bettingMode === 'jacobo'}  onClick={() => onBettingModeChange('jacobo')}  color="yellow" />
       <ModeTab label="🪞 Espejo"   active={bettingMode === 'mirror'}  onClick={() => onBettingModeChange('mirror')}  color="cyan"   />
+      <ModeTab label="🌊 Vecinos"  active={bettingMode === 'vecinos'} onClick={() => onBettingModeChange('vecinos')} color="green"  />
       <ModeTab label="🤖 Auto"     active={bettingMode === 'auto'}    onClick={() => onBettingModeChange('auto')}    color="orange" />
     </div>
   );
@@ -125,6 +128,19 @@ export default function BettingPanel({
     );
   }
 
+  // ── Vecinos mode ──
+  if (bettingMode === 'vecinos') {
+    return (
+      <div className="card flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <span className="card-title mb-0">🎯 Sistema de Apuesta</span>
+        </div>
+        {modeSelector}
+        <VecinosPanel state={vecinosState} />
+      </div>
+    );
+  }
+
   // ── Auto mode ──
   if (bettingMode === 'auto') {
     const autoSystem   = autoSystemState?.system;
@@ -152,6 +168,13 @@ export default function BettingPanel({
           <>
             <div className="border-t border-gray-800" />
             <JacoboPanel state={jacoboState} />
+          </>
+        )}
+
+        {autoSystem === 'VECINOS' && (
+          <>
+            <div className="border-t border-gray-800" />
+            <VecinosPanel state={vecinosState} />
           </>
         )}
 

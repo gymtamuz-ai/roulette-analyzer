@@ -7,6 +7,7 @@ const { computeJacoboState, calculateJacoboBetResult } = require('../utils/jacob
 const { computeMirrorState, calculateMirrorBetResult } = require('../utils/mirror');
 const { computeBestSystem }                            = require('../utils/autoSystem');
 const { computeHotNumbers }                            = require('../utils/hotNumbers');
+const { computeVecinosState, calculateVecinosBetResult } = require('../utils/vecinos');
 
 // ─── Compute bet result for any mode ──────────────────────────────────────────
 function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color', lockedSystem = null) {
@@ -18,6 +19,10 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
     const state = computeMirrorState(previousSpins, mirrorMode);
     return calculateMirrorBetResult(state, newSpinCls);
   }
+  if (bettingMode === 'vecinos') {
+    const state = computeVecinosState(previousSpins);
+    return calculateVecinosBetResult(state, newSpinCls.number);
+  }
   if (bettingMode === 'auto') {
     const auto = computeBestSystem(previousSpins, passTarget, systemType, lockedSystem);
     if (!auto.system) return null;
@@ -28,6 +33,10 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
     if (auto.system === 'JACOBO') {
       const state = computeJacoboState(previousSpins);
       return calculateJacoboBetResult(state, newSpinCls.number);
+    }
+    if (auto.system === 'VECINOS') {
+      const state = computeVecinosState(previousSpins);
+      return calculateVecinosBetResult(state, newSpinCls.number);
     }
     // SECTORES — AUTO MODE siempre usa A4, nunca A3
     const state = computeBettingState(previousSpins, 'A4', parseInt(passTarget));

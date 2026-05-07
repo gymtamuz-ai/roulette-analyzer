@@ -6,13 +6,14 @@
 import { computeMirrorState }                                    from './mirror';
 import { computeJacoboState, evaluateJacoboOpportunity }         from './jacobo';
 import { computeBettingState }                                   from './roulette';
+import { computeVecinosState, findHotZone, ANALYSIS_WINDOW as VECINOS_WIN } from './vecinos';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 export const MIN_SCORE_TO_BET   = 30;
 export const SECTOR_EVAL_WINDOW = 30;
 export const JACOBO_EVAL_WINDOW = 30;
 const        MIRROR_WIN         = 10;
-const        SYSTEM_PRIORITY    = { ESPEJO: 3, SECTORES: 2, JACOBO: 1 };
+const        SYSTEM_PRIORITY    = { ESPEJO: 4, VECINOS: 3, SECTORES: 2, JACOBO: 1 };
 
 // ─── Internal spin-value helpers ──────────────────────────────────────────────
 function valueForMode(spin, mode) {
@@ -137,11 +138,31 @@ function scoreJacoboSystem(spins) {
   return { score, uniqueNumbers: uniqueNums, maxCount, reason };
 }
 
+// ─── D) Score Vecinos ─────────────────────────────────────────────────────────
+// z ≥ 2.0 → 70 · z ≥ 1.5 → 50 · z ≥ 1.0 → 35 · z ≥ 0.7 → 20
+function scoreVecinosSystem(spins) {
+  if (spins.length < VECINOS_WIN) {
+    return { score: 0, reason: 'Vecinos: datos insuficientes', zScore: 0 };
+  }
+  const zone = findHotZone(spins);
+  if (!zone) return { score: 0, reason: 'Sin zona caliente detectada', zScore: 0 };
+
+  const z = zone.zScore;
+  let score = 0;
+  if (z >= 2.0)      score = 70;
+  else if (z >= 1.5) score = 50;
+  else if (z >= 1.0) score = 35;
+  else if (z >= 0.7) score = 20;
+
+  const reason = `Zona caliente z=${z.toFixed(1)} (${zone.hits}/${VECINOS_WIN} hits · centro ${zone.center})`;
+  return { score, zScore: z, hits: zone.hits, center: zone.center, reason };
+}
+
 // ─── Risk penalty: penalizar sistemas con ciclos perdidos ─────────────────────
 function getRiskPenalty(state) {
   if (!state) return 0;
-  // Bloqueado = ciclo recientemente agotado
-  if (state.status === 'BLOCKED') return -30;
+  // Bloqueado / cooldown = ciclo recientemente agotado
+  if (state.status === 'BLOCKED' || state.status === 'COOLING') return -30;
   // 2+ abortados sin victorias
   if ((state.cyclesAborted || 0) >= 2 && (state.cyclesAborted || 0) > (state.cyclesCompleted || 0)) return -30;
   return 0;
@@ -160,6 +181,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     range:  computeMirrorState(spins, 'range'),
   };
   const jacoboState  = computeJacoboState(spins);
+  const vecinosState = computeVecinosState(spins);
   // AUTO MODE: lock de SECTORES siempre evalúa A4, nunca A3
   const bettingState = computeBettingState(spins, 'A4', passTarget);
 
@@ -171,12 +193,14 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
 
     if (ls === 'ESPEJO') {
       const mState = lm ? (mirrorStates[lm] || computeMirrorState(spins, lm)) : null;
-      // Lock stays active while ACTIVE or BLOCKED; WATCHING = between cycles = can re-score
       stillCycling = mState ? mState.status === 'ACTIVE' || mState.status === 'BLOCKED' : false;
       lockReason   = mState?.reason ?? '';
     } else if (ls === 'JACOBO') {
       stillCycling = jacoboState.isActive;
       lockReason   = jacoboState.currentStep ? `paso ${jacoboState.currentStep}` : '';
+    } else if (ls === 'VECINOS') {
+      stillCycling = vecinosState.isActive;
+      lockReason   = vecinosState.isActive ? `paso ${vecinosState.step}/${vecinosState.totalSteps}` : '';
     } else if (ls === 'SECTORES') {
       stillCycling = bettingState?.active ?? false;
       lockReason   = bettingState?.active ? `bola ${bettingState.currentBall}/${bettingState.totalBalls}` : '';
@@ -221,6 +245,15 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     };
   }
 
+  if (vecinosState.isActive) {
+    return {
+      system: 'VECINOS', confidence: vecinosState.confidence || 50, locked: true, lockReleased: !!lockedSystem,
+      mirrorMode: null,
+      reason: `Ciclo activo · paso ${vecinosState.step ?? 1}/${vecinosState.totalSteps ?? 5}`,
+      scoreBreakdown: null,
+    };
+  }
+
   if (bettingState?.active) {
     return {
       system: 'SECTORES', confidence: 65, locked: true, lockReleased: !!lockedSystem,
@@ -234,6 +267,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
   const mScore = scoreMirrorSystem(spins);
   const sScore = scoreSectorsSystem(spins);
   const jScore = scoreJacoboSystem(spins);
+  const vScore = scoreVecinosSystem(spins);
 
   // Penalización por riesgo
   const bestMirrorState = Object.values(mirrorStates)
@@ -248,13 +282,14 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
      bettingState?.cyclesAborted > (bettingState?.cyclesCompleted || 0)) ? -30 : 0
   );
   const jAdj = jScore.score + getRiskPenalty(jacoboState);
+  const vAdj = vScore.score + getRiskPenalty(vecinosState);
 
   const scoreBreakdown = {
     espejo:   Math.max(0, mAdj),
     sectores: Math.max(0, sAdj),
     jacobo:   Math.max(0, jAdj),
-    // Raw (before penalty) for display
-    _raw: { espejo: mScore.score, sectores: sScore.score, jacobo: jScore.score },
+    vecinos:  Math.max(0, vAdj),
+    _raw: { espejo: mScore.score, sectores: sScore.score, jacobo: jScore.score, vecinos: vScore.score },
   };
 
   // ── Candidatos con score >= umbral ──
@@ -262,6 +297,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     { system: 'ESPEJO',   score: mAdj, reason: mScore.reason, mirrorMode: mScore.mode },
     { system: 'SECTORES', score: sAdj, reason: sScore.reason, mirrorMode: null },
     { system: 'JACOBO',   score: jAdj, reason: jScore.reason, mirrorMode: null },
+    { system: 'VECINOS',  score: vAdj, reason: vScore.reason, mirrorMode: null },
   ].filter(c => c.score >= MIN_SCORE_TO_BET);
 
   if (candidates.length === 0) {

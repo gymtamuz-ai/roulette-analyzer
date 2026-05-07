@@ -23,12 +23,20 @@ const SYSTEM_CFG = {
     text:   'text-yellow-400',
     bar:    'bg-yellow-500',
   },
+  VECINOS: {
+    label:  '🌊 VECINOS',
+    border: 'border-green-500',
+    bg:     'bg-green-900/20',
+    text:   'text-green-400',
+    bar:    'bg-green-500',
+  },
 };
 
 const SCORE_ROWS = [
   { key: 'espejo',   label: '🪞 Espejo',   system: 'ESPEJO'   },
   { key: 'sectores', label: '🎯 Sectores', system: 'SECTORES' },
   { key: 'jacobo',   label: '⚡ Jacobo',   system: 'JACOBO'   },
+  { key: 'vecinos',  label: '🌊 Vecinos',  system: 'VECINOS'  },
 ];
 
 // ─── Score bar ────────────────────────────────────────────────────────────────

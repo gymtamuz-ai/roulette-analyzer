@@ -5,12 +5,13 @@
 const { computeMirrorState }                             = require('./mirror');
 const { computeJacoboState, evaluateJacoboOpportunity }  = require('./jacobo');
 const { computeBettingState }                            = require('./betting');
+const { computeVecinosState, findHotZone, ANALYSIS_WINDOW: VECINOS_WIN } = require('./vecinos');
 
 const MIN_SCORE_TO_BET   = 30;
 const SECTOR_EVAL_WINDOW = 30;
 const JACOBO_EVAL_WINDOW = 30;
 const MIRROR_WIN         = 10;
-const SYSTEM_PRIORITY    = { ESPEJO: 3, SECTORES: 2, JACOBO: 1 };
+const SYSTEM_PRIORITY    = { ESPEJO: 4, VECINOS: 3, SECTORES: 2, JACOBO: 1 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function valueForMode(spin, mode) {
@@ -93,10 +94,24 @@ function scoreJacoboSystem(spins) {
   return { score };
 }
 
+// ─── D) Score Vecinos ─────────────────────────────────────────────────────────
+function scoreVecinosSystem(spins) {
+  if (spins.length < VECINOS_WIN) return { score: 0, zScore: 0 };
+  const zone = findHotZone(spins);
+  if (!zone) return { score: 0, zScore: 0 };
+  const z = zone.zScore;
+  let score = 0;
+  if (z >= 2.0)      score = 70;
+  else if (z >= 1.5) score = 50;
+  else if (z >= 1.0) score = 35;
+  else if (z >= 0.7) score = 20;
+  return { score, zScore: z, center: zone.center };
+}
+
 // ─── Risk penalty ─────────────────────────────────────────────────────────────
 function getRiskPenalty(state) {
   if (!state) return 0;
-  if (state.status === 'BLOCKED') return -30;
+  if (state.status === 'BLOCKED' || state.status === 'COOLING') return -30;
   if ((state.cyclesAborted || 0) >= 2 && (state.cyclesAborted || 0) > (state.cyclesCompleted || 0)) return -30;
   return 0;
 }
@@ -112,6 +127,7 @@ function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedS
     range:  computeMirrorState(spins, 'range'),
   };
   const jacoboState  = computeJacoboState(spins);
+  const vecinosState = computeVecinosState(spins);
   // AUTO MODE: lock de SECTORES siempre evalúa A4, nunca A3
   const bettingState = computeBettingState(spins, 'A4', parseInt(passTarget));
 
@@ -125,6 +141,8 @@ function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedS
       stillCycling = mState ? mState.status === 'ACTIVE' || mState.status === 'BLOCKED' : false;
     } else if (ls === 'JACOBO') {
       stillCycling = jacoboState.isActive;
+    } else if (ls === 'VECINOS') {
+      stillCycling = vecinosState.isActive;
     } else if (ls === 'SECTORES') {
       stillCycling = bettingState?.active ?? false;
     }
@@ -138,13 +156,15 @@ function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedS
   for (const [mode, mState] of Object.entries(mirrorStates)) {
     if (mState.isActive) return { system: 'ESPEJO',   mirrorMode: mode };
   }
-  if (jacoboState.isActive) return { system: 'JACOBO',   mirrorMode: null };
-  if (bettingState?.active) return { system: 'SECTORES', mirrorMode: null };
+  if (jacoboState.isActive)  return { system: 'JACOBO',   mirrorMode: null };
+  if (vecinosState.isActive) return { system: 'VECINOS',  mirrorMode: null };
+  if (bettingState?.active)  return { system: 'SECTORES', mirrorMode: null };
 
   // Scoring
   const mScore = scoreMirrorSystem(spins);
   const sScore = scoreSectorsSystem(spins);
   const jScore = scoreJacoboSystem(spins);
+  const vScore = scoreVecinosSystem(spins);
 
   const bestMirrorState = Object.values(mirrorStates)
     .sort((a, b) =>
@@ -158,11 +178,13 @@ function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedS
      bettingState?.cyclesAborted > (bettingState?.cyclesCompleted || 0)) ? -30 : 0
   );
   const jAdj = jScore.score + getRiskPenalty(jacoboState);
+  const vAdj = vScore.score + getRiskPenalty(vecinosState);
 
   const candidates = [
     { system: 'ESPEJO',   score: mAdj, mirrorMode: mScore.mode },
     { system: 'SECTORES', score: sAdj, mirrorMode: null },
     { system: 'JACOBO',   score: jAdj, mirrorMode: null },
+    { system: 'VECINOS',  score: vAdj, mirrorMode: null },
   ].filter(c => c.score >= MIN_SCORE_TO_BET);
 
   if (candidates.length === 0) return { system: null, mirrorMode: null };

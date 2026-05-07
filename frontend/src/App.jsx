@@ -6,6 +6,7 @@ import {
 } from './utils/roulette';
 import { computeJacoboState } from './utils/jacobo';
 import { computeMirrorState } from './utils/mirror';
+import { computeVecinosState } from './utils/vecinos';
 import { computeBestSystem }  from './utils/autoSystem';
 import { getHotNumbers }       from './utils/hotNumbers';
 
@@ -69,6 +70,7 @@ export default function App() {
   const maxDelays      = calculateMaxDelays(spins);
   const bettingState   = computeBettingState(spins, systemOverride, passTarget);
   const jacoboState    = computeJacoboState(spins);
+  const vecinosState   = computeVecinosState(spins);
   const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock);
   const hotNumbers      = useMemo(() => getHotNumbers(spins), [spins]);
 
@@ -374,6 +376,7 @@ export default function App() {
             onSystemOverride={setSystemOverride}
             jacoboState={jacoboState}
             mirrorState={mirrorState}
+            vecinosState={vecinosState}
             autoSystemState={autoSystemState}
             bettingMode={bettingMode}
             onBettingModeChange={handleBettingModeChange}
