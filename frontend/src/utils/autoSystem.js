@@ -7,6 +7,7 @@ import { computeMirrorState }                                    from './mirror'
 import { computeJacoboState, evaluateJacoboOpportunity }         from './jacobo';
 import { computeBettingState }                                   from './roulette';
 import { computeVecinosState, findHotZone, ANALYSIS_WINDOW as VECINOS_WIN } from './vecinos';
+import { computeZonePersistence } from './vecinosAnalytics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 export const MIN_SCORE_TO_BET   = 30;
@@ -138,24 +139,26 @@ function scoreJacoboSystem(spins) {
   return { score, uniqueNumbers: uniqueNums, maxCount, reason };
 }
 
-// ─── D) Score Vecinos ─────────────────────────────────────────────────────────
-// z ≥ 2.0 → 70 · z ≥ 1.5 → 50 · z ≥ 1.0 → 35 · z ≥ 0.7 → 20
+// ─── D) Score Vecinos (persistencia-aware) ────────────────────────────────────
 function scoreVecinosSystem(spins) {
   if (spins.length < VECINOS_WIN) {
     return { score: 0, reason: 'Vecinos: datos insuficientes', zScore: 0 };
   }
   const zone = findHotZone(spins);
-  if (!zone) return { score: 0, reason: 'Sin zona caliente detectada', zScore: 0 };
+  if (!zone) return { score: 0, reason: 'Sin zona caliente (z≥1.63 sin anti-spike)', zScore: 0 };
 
   const z = zone.zScore;
-  let score = 0;
-  if (z >= 2.0)      score = 70;
-  else if (z >= 1.5) score = 50;
-  else if (z >= 1.0) score = 35;
-  else if (z >= 0.7) score = 20;
+  let base = 0;
+  if (z >= 2.5)       base = 65;
+  else if (z >= 2.0)  base = 55;
+  else if (z >= 1.65) base = 42;
+  else if (z >= 1.30) base = 28;
 
-  const reason = `Zona caliente z=${z.toFixed(1)} (${zone.hits}/${VECINOS_WIN} hits · centro ${zone.center})`;
-  return { score, zScore: z, hits: zone.hits, center: zone.center, reason };
+  const { score: pers } = computeZonePersistence(spins, zone.numbers);
+  const persistBonus = Math.round(pers * 20);
+  const score = Math.max(0, Math.min(99, base + persistBonus));
+  const reason = `Zona z=${z.toFixed(1)} pers=${(pers * 100).toFixed(0)}% (${zone.hits}/${VECINOS_WIN} hits · centro ${zone.center})`;
+  return { score, zScore: z, persistence: pers, hits: zone.hits, center: zone.center, reason };
 }
 
 // ─── Risk penalty: penalizar sistemas con ciclos perdidos ─────────────────────

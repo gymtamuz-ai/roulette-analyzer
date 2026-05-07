@@ -22,6 +22,8 @@ import PerformancePanel from './components/PerformancePanel';
 import HotNumbersPanel from './components/HotNumbersPanel';
 import TableMemoryPanel from './components/TableMemoryPanel';
 import ImportModal from './components/ImportModal';
+import CylinderHeatmapVecinos from './components/CylinderHeatmapVecinos';
+import VecinosBacktestPanel   from './components/VecinosBacktestPanel';
 
 // ─── localStorage keys ────────────────────────────────────────────────────────
 const LS_SESSION      = 'roulette_session';
@@ -384,6 +386,16 @@ export default function App() {
             onMirrorModeChange={handleMirrorModeChange}
           />
           <PerformancePanel results={results} summary={resultsSummary} />
+          {/* Heatmap de cilindro y backtester solo cuando modo VECINOS está activo */}
+          {(bettingMode === 'vecinos' || (bettingMode === 'auto' && autoSystemState?.system === 'VECINOS')) && (
+            <>
+              <CylinderHeatmapVecinos
+                spins={spins}
+                activeZone={vecinosState?.zone ?? null}
+              />
+              <VecinosBacktestPanel spins={spins} />
+            </>
+          )}
           <StatsPanel spins={spins} />
           <BiasPanel spins={spins} />
         </div>

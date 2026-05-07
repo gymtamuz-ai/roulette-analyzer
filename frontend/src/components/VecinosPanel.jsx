@@ -1,4 +1,4 @@
-import { VECINOS_PROGRESSION, ZONE_RADIUS, ANALYSIS_WINDOW, MIN_ZONE_HITS, MAX_STEPS } from '../utils/vecinos';
+import { VECINOS_PROGRESSION, ZONE_RADIUS, ANALYSIS_WINDOW, MIN_ZONE_HITS, MAX_STEPS, MIN_QUALITY } from '../utils/vecinos';
 import { RED_NUMBERS } from '../utils/roulette';
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -16,14 +16,79 @@ function NumChip({ n, highlight = false }) {
   );
 }
 
-function ConfidenceBar({ value }) {
-  const color = value >= 70 ? 'bg-green-500' : value >= 45 ? 'bg-yellow-500' : 'bg-orange-500';
+function ConfidenceBar({ value, color = 'bg-green-500' }) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
         <div className={`h-full rounded-full transition-all duration-500 ${color}`} style={{ width: `${value}%` }} />
       </div>
       <span className="text-xs text-gray-400 w-8 text-right">{value}%</span>
+    </div>
+  );
+}
+
+// ─── Quality ring ─────────────────────────────────────────────────────────────
+function QualityBadge({ quality }) {
+  const color = quality >= 60 ? 'text-green-400 border-green-600' : quality >= 40 ? 'text-yellow-400 border-yellow-700' : 'text-orange-400 border-orange-700';
+  return (
+    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-bold ${color}`}>
+      <span>⬟</span>
+      <span>Calidad {quality}/100</span>
+    </div>
+  );
+}
+
+// ─── Analytics row ────────────────────────────────────────────────────────────
+function AnalyticsRow({ analytics, zone }) {
+  if (!analytics || !zone) return null;
+  const { persistence, stability, decayZ, antiSpike, breakdown } = analytics;
+
+  return (
+    <div className="bg-gray-800/60 rounded-lg p-2.5 flex flex-col gap-1.5">
+      <div className="text-xs text-gray-500 mb-0.5 flex items-center justify-between">
+        <span>Análisis estadístico</span>
+        {antiSpike && <span className="text-orange-400 text-xs">⚡ Anti-spike activo</span>}
+      </div>
+
+      {/* Persistence */}
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-gray-400 w-24">Persistencia</span>
+        <div className="flex-1 mx-2">
+          <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${persistence * 100}%` }} />
+          </div>
+        </div>
+        <span className="text-blue-400 font-bold w-10 text-right">{(persistence * 100).toFixed(0)}%</span>
+      </div>
+
+      {/* Stability */}
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-gray-400 w-24">Estabilidad</span>
+        <div className="flex-1 mx-2">
+          <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+            <div className="h-full bg-purple-500 rounded-full" style={{ width: `${stability * 100}%` }} />
+          </div>
+        </div>
+        <span className="text-purple-400 font-bold w-10 text-right">{(stability * 100).toFixed(0)}%</span>
+      </div>
+
+      {/* Decay Z */}
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-gray-400 w-24">Z decay</span>
+        <div className="flex-1 mx-2" />
+        <span className={`font-bold w-10 text-right ${decayZ >= 1.0 ? 'text-green-400' : decayZ >= 0 ? 'text-yellow-400' : 'text-gray-500'}`}>
+          {decayZ >= 0 ? '+' : ''}{decayZ.toFixed(2)}σ
+        </span>
+      </div>
+
+      {/* Score breakdown */}
+      {breakdown && (
+        <div className="text-xs text-gray-600 pt-1 border-t border-gray-700">
+          base {breakdown.baseScore} + pers {breakdown.persistBonus} + estab {breakdown.stabilBonus}
+          {breakdown.decayBonus > 0 ? ` + decay ${breakdown.decayBonus}` : ''}
+          {breakdown.spikePenalty ? ` − spike ${Math.abs(breakdown.spikePenalty)}` : ''}
+        </div>
+      )}
     </div>
   );
 }
@@ -55,14 +120,16 @@ function StatusHeader({ status, reason, confidence }) {
         {cfg.icon} {cfg.label}
       </div>
       <div className="text-gray-400 text-xs mb-2">{reason}</div>
-      {status === 'ACTIVE' && confidence > 0 && <ConfidenceBar value={confidence} />}
+      {status === 'ACTIVE' && confidence > 0 && (
+        <ConfidenceBar value={confidence} color={confidence >= 60 ? 'bg-green-500' : 'bg-yellow-500'} />
+      )}
     </div>
   );
 }
 
 // ─── Progression bar ──────────────────────────────────────────────────────────
 function StepBar({ currentStep, isActive }) {
-  const cumulativeLoss = [0, 9, 27, 54, 90]; // chips already lost when entering each step
+  const cumulativeLoss = [0, 9, 27, 54, 90];
   return (
     <div className="flex gap-0.5">
       {VECINOS_PROGRESSION.map(({ step, chipsPerNumber, totalChips }) => {
@@ -86,11 +153,11 @@ function StepBar({ currentStep, isActive }) {
   );
 }
 
-// ─── Zone stats row ───────────────────────────────────────────────────────────
+// ─── Zone stats ───────────────────────────────────────────────────────────────
 function ZoneStats({ zone }) {
   if (!zone) return null;
   const { hits, expected, zScore } = zone;
-  const zColor = zScore >= 2.0 ? 'text-green-400' : zScore >= 1.5 ? 'text-yellow-400' : 'text-orange-400';
+  const zColor = zScore >= 2.0 ? 'text-green-400' : zScore >= 1.65 ? 'text-yellow-400' : 'text-orange-400';
   return (
     <div className="grid grid-cols-3 gap-2 text-center text-xs">
       <div className="bg-gray-800 rounded-lg p-2">
@@ -126,6 +193,7 @@ export default function VecinosPanel({ state }) {
     isActive,
     numbers,
     zone,
+    analytics,
     step = 1, totalSteps = MAX_STEPS,
     chipsPerNumber = 1, totalChips = 9,
     netProfitIfWin = 27, cycleInvested = 0,
@@ -142,6 +210,18 @@ export default function VecinosPanel({ state }) {
       {/* ── Status header ── */}
       <StatusHeader status={status} reason={reason} confidence={confidence} />
 
+      {/* ── Quality badge (when zone detected, active or not) ── */}
+      {analytics && (
+        <div className="flex items-center justify-between">
+          <QualityBadge quality={analytics.quality} />
+          {analytics.antiSpike && (
+            <span className="text-xs text-orange-400 border border-orange-800 rounded-full px-2 py-0.5">
+              ⚡ Anti-spike (z&gt;3.5)
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── COOLING info ── */}
       {status === 'COOLING' && spinsRemaining > 0 && (
         <div className="bg-orange-900/20 border border-orange-800 rounded-lg p-3 text-center">
@@ -155,11 +235,15 @@ export default function VecinosPanel({ state }) {
       {/* ── Zone stats ── */}
       {zone && <ZoneStats zone={zone} />}
 
+      {/* ── Analytics breakdown ── */}
+      {analytics && <AnalyticsRow analytics={analytics} zone={zone} />}
+
       {/* ── Numbers in wheel order ── */}
-      {isActive && numbers && (
+      {numbers && (
         <div>
           <div className="text-xs text-gray-500 mb-2">
-            9 plenos · zona cilindro · centro: <span className="text-green-400 font-bold">{zone?.center ?? '?'}</span>
+            9 plenos · cilindro · centro: <span className="text-green-400 font-bold">{zone?.center ?? '?'}</span>
+            {!isActive && <span className="ml-2 text-yellow-600">{status === 'STANDBY' && analytics?.quality < MIN_QUALITY ? '(calidad insuficiente)' : ''}</span>}
           </div>
           <div className="flex flex-wrap gap-1">
             {numbers.map(n => (
@@ -172,54 +256,50 @@ export default function VecinosPanel({ state }) {
         </div>
       )}
 
-      {/* ── Bet stats ── */}
+      {/* ── Bet stats (only when actively betting) ── */}
       {isActive && (
-        <div className="grid grid-cols-3 gap-2 text-center text-xs">
-          <div className="bg-gray-800 rounded-lg p-2">
-            <div className="text-gray-500">Paso</div>
-            <div className="font-black text-green-400 text-xl">{step}/{totalSteps}</div>
+        <>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="bg-gray-800 rounded-lg p-2">
+              <div className="text-gray-500">Paso</div>
+              <div className="font-black text-green-400 text-xl">{step}/{totalSteps}</div>
+            </div>
+            <div className="bg-gray-800 rounded-lg p-2">
+              <div className="text-gray-500">Por número</div>
+              <div className="font-black text-white text-xl">{chipsPerNumber}f</div>
+            </div>
+            <div className="bg-gray-800 rounded-lg p-2">
+              <div className="text-gray-500">Total apuesta</div>
+              <div className="font-black text-orange-400 text-xl">{totalChips}f</div>
+            </div>
           </div>
-          <div className="bg-gray-800 rounded-lg p-2">
-            <div className="text-gray-500">Por número</div>
-            <div className="font-black text-white text-xl">{chipsPerNumber}f</div>
+
+          <div className="bg-gray-800/60 rounded-lg p-2.5 text-center">
+            <div className="text-xs text-gray-400 mb-1">Ganancia neta si acierta ahora</div>
+            <div className={`text-2xl font-black ${netProfitIfWin > 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {netProfitIfWin > 0 ? '+' : ''}{netProfitIfWin} fichas
+            </div>
+            {cycleInvested > 0 && (
+              <div className="text-xs text-gray-500 mt-0.5">Invertido en ciclo: {cycleInvested}f</div>
+            )}
           </div>
-          <div className="bg-gray-800 rounded-lg p-2">
-            <div className="text-gray-500">Total apuesta</div>
-            <div className="font-black text-orange-400 text-xl">{totalChips}f</div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-lg p-2 border border-green-700 bg-green-900/10">
+              <div className="text-green-400 font-semibold mb-1">Si ACIERTA →</div>
+              <div className="text-gray-300">{onWin}</div>
+            </div>
+            <div className={`rounded-lg p-2 border ${isLastStep ? 'border-red-700 bg-red-900/20' : 'border-gray-700 bg-gray-800'}`}>
+              <div className="text-red-400 font-semibold mb-1">Si FALLA →</div>
+              {onLoss?.startsWith('STOP')
+                ? <div className="text-red-300 font-bold">⛔ {onLoss}</div>
+                : <div className="text-gray-300">{onLoss}</div>}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
-      {/* ── Net profit callout ── */}
-      {isActive && (
-        <div className="bg-gray-800/60 rounded-lg p-2.5 text-center">
-          <div className="text-xs text-gray-400 mb-1">Ganancia neta si acierta ahora</div>
-          <div className={`text-2xl font-black ${netProfitIfWin > 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {netProfitIfWin > 0 ? '+' : ''}{netProfitIfWin} fichas
-          </div>
-          {cycleInvested > 0 && (
-            <div className="text-xs text-gray-500 mt-0.5">Invertido en ciclo: {cycleInvested}f</div>
-          )}
-        </div>
-      )}
-
-      {/* ── Win / Loss outcomes ── */}
-      {isActive && (
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-lg p-2 border border-green-700 bg-green-900/10">
-            <div className="text-green-400 font-semibold mb-1">Si ACIERTA →</div>
-            <div className="text-gray-300">{onWin}</div>
-          </div>
-          <div className={`rounded-lg p-2 border ${isLastStep ? 'border-red-700 bg-red-900/20' : 'border-gray-700 bg-gray-800'}`}>
-            <div className="text-red-400 font-semibold mb-1">Si FALLA →</div>
-            {onLoss?.startsWith('STOP')
-              ? <div className="text-red-300 font-bold">⛔ {onLoss}</div>
-              : <div className="text-gray-300">{onLoss}</div>}
-          </div>
-        </div>
-      )}
-
-      {/* ── Progression ── */}
+      {/* ── Progression (always shown) ── */}
       <div>
         <div className="text-xs text-gray-500 mb-1.5">Progresión ({MAX_STEPS} pasos · pérd. máx. 144f):</div>
         <StepBar currentStep={step} isActive={isActive} />
@@ -228,14 +308,14 @@ export default function VecinosPanel({ state }) {
         </div>
       </div>
 
-      {/* ── Coverage info (STANDBY / WAITING) ── */}
+      {/* ── How it works (when not active) ── */}
       {!isActive && status !== 'COOLING' && (
-        <div className="bg-gray-800/40 rounded-lg p-2.5 text-xs text-gray-500">
-          <div className="font-semibold text-gray-400 mb-1">¿Cómo funciona?</div>
-          <div>Analiza las últimas <strong className="text-gray-300">{ANALYSIS_WINDOW}</strong> tiradas.</div>
-          <div>Detecta la zona de <strong className="text-gray-300">9 números</strong> con mayor densidad en el cilindro.</div>
-          <div>Activa cuando hay ≥ <strong className="text-gray-300">{MIN_ZONE_HITS}</strong> hits en la zona (z ≥ 1.1σ).</div>
-          <div className="mt-1">Cobertura: 9/37 = <strong className="text-gray-300">24.3%</strong> por tirada.</div>
+        <div className="bg-gray-800/40 rounded-lg p-2.5 text-xs text-gray-500 flex flex-col gap-0.5">
+          <div className="font-semibold text-gray-400 mb-1">Criterios de activación:</div>
+          <div>• Z-score ≥ 1.63 (p &lt; 0.10) en ventana de {ANALYSIS_WINDOW} tiradas</div>
+          <div>• Z-score ≤ {3.5} (anti-spike — picos extremos revierten)</div>
+          <div>• Calidad mínima {MIN_QUALITY}/100 (z + persistencia + estabilidad)</div>
+          <div>• Cobertura: 9/37 = <strong className="text-gray-300">24.3%</strong> por tirada</div>
         </div>
       )}
 

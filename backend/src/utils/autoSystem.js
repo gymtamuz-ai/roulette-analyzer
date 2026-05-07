@@ -6,6 +6,7 @@ const { computeMirrorState }                             = require('./mirror');
 const { computeJacoboState, evaluateJacoboOpportunity }  = require('./jacobo');
 const { computeBettingState }                            = require('./betting');
 const { computeVecinosState, findHotZone, ANALYSIS_WINDOW: VECINOS_WIN } = require('./vecinos');
+const { computeZonePersistence } = require('./vecinosAnalytics');
 
 const MIN_SCORE_TO_BET   = 30;
 const SECTOR_EVAL_WINDOW = 30;
@@ -94,18 +95,30 @@ function scoreJacoboSystem(spins) {
   return { score };
 }
 
-// ─── D) Score Vecinos ─────────────────────────────────────────────────────────
+// ─── D) Score Vecinos (persistencia-aware) ────────────────────────────────────
+// Score considera tanto z-score como persistencia de la zona.
+// Persistencia alta multiplica la confianza ya que señales persistentes
+// son exponencialmente menos probables de ser ruido aleatorio.
 function scoreVecinosSystem(spins) {
-  if (spins.length < VECINOS_WIN) return { score: 0, zScore: 0 };
+  if (spins.length < VECINOS_WIN) return { score: 0, zScore: 0, reason: 'Vecinos: datos insuficientes' };
   const zone = findHotZone(spins);
-  if (!zone) return { score: 0, zScore: 0 };
+  if (!zone) return { score: 0, zScore: 0, reason: 'Sin zona caliente (z≥1.63 sin anti-spike)' };
+
   const z = zone.zScore;
-  let score = 0;
-  if (z >= 2.0)      score = 70;
-  else if (z >= 1.5) score = 50;
-  else if (z >= 1.0) score = 35;
-  else if (z >= 0.7) score = 20;
-  return { score, zScore: z, center: zone.center };
+  // Base score por z-score
+  let base = 0;
+  if (z >= 2.5)       base = 65;
+  else if (z >= 2.0)  base = 55;
+  else if (z >= 1.65) base = 42;
+  else if (z >= 1.30) base = 28;
+
+  // Bonus por persistencia (0-20 pts): zona consistentemente caliente = mucho más probable sesgo real
+  const { score: pers } = computeZonePersistence(spins, zone.numbers);
+  const persistBonus = Math.round(pers * 20);
+
+  const score = Math.max(0, Math.min(99, base + persistBonus));
+  const reason = `Zona z=${z.toFixed(1)} pers=${(pers * 100).toFixed(0)}% (${zone.hits}/${VECINOS_WIN} hits · centro ${zone.center})`;
+  return { score, zScore: z, persistence: pers, center: zone.center, reason };
 }
 
 // ─── Risk penalty ─────────────────────────────────────────────────────────────
