@@ -26,10 +26,11 @@ import CylinderHeatmapVecinos from './components/CylinderHeatmapVecinos';
 import VecinosBacktestPanel   from './components/VecinosBacktestPanel';
 
 // ─── localStorage keys ────────────────────────────────────────────────────────
-const LS_SESSION      = 'roulette_session';
-const LS_TABLE        = 'roulette_table';
-const LS_BETTING_MODE = 'roulette_betting_mode';
-const LS_MIRROR_MODE  = 'roulette_mirror_mode';
+const LS_SESSION             = 'roulette_session';
+const LS_TABLE               = 'roulette_table';
+const LS_BETTING_MODE        = 'roulette_betting_mode';
+const LS_MIRROR_MODE         = 'roulette_mirror_mode';
+const LS_VECINOS_BETTING_TYPE = 'roulette_vecinos_betting_type';
 
 function enrichSpin(s) {
   const cls = classifyNumber(s.number);
@@ -47,11 +48,13 @@ export default function App() {
   const [simulating, setSimulating]         = useState(false);
   const [passTarget, setPassTarget]         = useState(2);
   const [systemOverride, setSystemOverride] = useState(null);
-  const [bettingMode, setBettingMode]       = useState(() => localStorage.getItem(LS_BETTING_MODE) || 'sectors');
-  const [mirrorMode,  setMirrorMode]        = useState(() => localStorage.getItem(LS_MIRROR_MODE)  || 'color');
-  const [error, setError]                   = useState('');
-  const [strategyLock, setStrategyLock]     = useState(null);
-  const [showImport, setShowImport]         = useState(false);
+  const [bettingMode, setBettingMode]               = useState(() => localStorage.getItem(LS_BETTING_MODE) || 'sectors');
+  const [mirrorMode,  setMirrorMode]                = useState(() => localStorage.getItem(LS_MIRROR_MODE)  || 'color');
+  const [vecinosBettingType, setVecinosBettingType] = useState(() => localStorage.getItem(LS_VECINOS_BETTING_TYPE) || 'progressive');
+  const [historicalBlocks, setHistoricalBlocks]     = useState([]);
+  const [error, setError]                           = useState('');
+  const [strategyLock, setStrategyLock]             = useState(null);
+  const [showImport, setShowImport]                 = useState(false);
   const simRef = useRef(null);
 
   // Persist bettingMode
@@ -66,6 +69,12 @@ export default function App() {
     localStorage.setItem(LS_MIRROR_MODE, mode);
   }, []);
 
+  // Persist vecinosBettingType
+  const handleVecinosBettingTypeChange = useCallback((type) => {
+    setVecinosBettingType(type);
+    localStorage.setItem(LS_VECINOS_BETTING_TYPE, type);
+  }, []);
+
   // ─── Derived state (zero-latency, computed locally) ───────────────────────
   const frequencies    = calculateFrequencies(spins);
   const allDelays      = calculateAllDelays(spins);
@@ -73,7 +82,7 @@ export default function App() {
   const bettingState   = computeBettingState(spins, systemOverride, passTarget);
   const jacoboState    = computeJacoboState(spins);
   const vecinosState   = computeVecinosState(spins);
-  const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock);
+  const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock, historicalBlocks);
   const hotNumbers      = useMemo(() => getHotNumbers(spins), [spins]);
 
   // In auto mode, use the auto-chosen mirror mode; otherwise user-chosen
@@ -100,6 +109,14 @@ export default function App() {
       }
     }
   }, []);
+
+  // ─── Fetch historical blocks whenever table changes (for VECINOS Fase 3) ─
+  useEffect(() => {
+    if (!table?.id) { setHistoricalBlocks([]); return; }
+    api.getTableMemoryBlocks(table.id)
+      .then(data => setHistoricalBlocks(data.blocks ?? []))
+      .catch(() => setHistoricalBlocks([]));  // graceful fallback
+  }, [table?.id]);
 
   // ─── Load spins + results whenever session changes ────────────────────────
   useEffect(() => {
@@ -159,7 +176,8 @@ export default function App() {
       const response = await api.addSpin(
         session.id, number, passTarget, systemOverride, bettingMode,
         effectiveMirrorMode,
-        bettingMode === 'auto' ? strategyLock : null
+        bettingMode === 'auto' ? strategyLock : null,
+        vecinosBettingType
       );
       const { bet_result, ...spin } = response;
       setSpins(prev => [...prev, enrichSpin(spin)]);
@@ -277,8 +295,14 @@ export default function App() {
       setResults(resultsData);
       setResultsSummary(summaryData);
       setStrategyLock(null);
+      // Refresh historical blocks (import may have created new hot_windows)
+      if (table?.id) {
+        api.getTableMemoryBlocks(table.id)
+          .then(data => setHistoricalBlocks(data.blocks ?? []))
+          .catch(() => {});
+      }
     } catch (e) { setError('Error recargando datos: ' + e.message); }
-  }, [session]);
+  }, [session, table?.id]);
 
   // ─── Session manager screen ───────────────────────────────────────────────
   if (showManager) {
@@ -384,6 +408,9 @@ export default function App() {
             onBettingModeChange={handleBettingModeChange}
             mirrorMode={effectiveMirrorMode}
             onMirrorModeChange={handleMirrorModeChange}
+            historicalBlocks={historicalBlocks}
+            vecinosBettingType={vecinosBettingType}
+            onVecinosBettingTypeChange={handleVecinosBettingTypeChange}
           />
           <PerformancePanel results={results} summary={resultsSummary} />
           {/* Heatmap de cilindro y backtester solo cuando modo VECINOS está activo */}

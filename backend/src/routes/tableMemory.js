@@ -62,4 +62,40 @@ router.get('/:tableId', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/table-memory/:tableId/blocks
+ *
+ * Devuelve los bloques crudos de hot_windows en orden cronológico.
+ * Cada bloque tiene 36 tiradas exactas. Se usa para análisis de decay
+ * temporal en VECINOS Fase 3 (memoria histórica + convergencia).
+ *
+ * { blocks: [{ blockIndex, sessionId, windowIndex, numbers, createdAt }], totalBlocks }
+ */
+router.get('/:tableId/blocks', async (req, res) => {
+  const tableId = parseInt(req.params.tableId, 10);
+  if (isNaN(tableId)) return res.status(400).json({ error: 'tableId must be a number' });
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, session_id, window_index, numbers, created_at
+       FROM hot_windows
+       WHERE table_id = $1
+       ORDER BY created_at ASC, id ASC`,
+      [tableId],
+    );
+
+    const blocks = rows.map((row, idx) => ({
+      blockIndex:  idx,   // global 0-based chronological index
+      sessionId:   row.session_id,
+      windowIndex: row.window_index,
+      numbers:     typeof row.numbers === 'string' ? JSON.parse(row.numbers) : row.numbers,
+      createdAt:   row.created_at,
+    }));
+
+    res.json({ blocks, totalBlocks: blocks.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -140,7 +140,25 @@ function calculateVecinosBetResult(state, spinNumber) {
   };
 }
 
+// ─── Flat bet result (modo plano) ─────────────────────────────────────────────
+// En modo plano apostamos siempre 1 ficha por número = 9 fichas total.
+// Sin progresión — cada tirada es independiente.
+// EV en rueda no sesgada: (9/37)×27 - (28/37)×9 = -0.24 fichas (house edge idéntico)
+function calculateVecinosFlatResult(state, spinNumber) {
+  if (!state || !state.isActive || !state.numbers) return null;
+  const isWin = state.numbers.includes(spinNumber);
+  return {
+    result: isWin ? 'win' : 'loss',
+    payout: isWin ? 36 : 0,
+    profit: isWin ? 27 : -9,
+    chips: 9,
+    multiplier: 1,
+    systemType: 'VECINOS',
+    betSectors: null,
+  };
+}
+
 module.exports = {
-  findHotZone, computeVecinosState, calculateVecinosBetResult,
+  findHotZone, computeVecinosState, calculateVecinosBetResult, calculateVecinosFlatResult,
   VECINOS_PROGRESSION, ZONE_RADIUS, ANALYSIS_WINDOW, MIN_ZONE_HITS, MIN_QUALITY,
 };

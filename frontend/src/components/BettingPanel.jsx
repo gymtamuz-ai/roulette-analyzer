@@ -80,6 +80,8 @@ export default function BettingPanel({
   // Mode control
   bettingMode = 'sectors', onBettingModeChange,
   mirrorMode = 'color', onMirrorModeChange,
+  // VECINOS Fase 3
+  historicalBlocks = [], vecinosBettingType = 'progressive', onVecinosBettingTypeChange,
 }) {
   // ── Mode selector (always shown, even with no session) ──
   const modeSelector = (
@@ -136,7 +138,12 @@ export default function BettingPanel({
           <span className="card-title mb-0">🎯 Sistema de Apuesta</span>
         </div>
         {modeSelector}
-        <VecinosPanel state={vecinosState} />
+        <VecinosPanel
+          state={vecinosState}
+          historicalBlocks={historicalBlocks}
+          bettingType={vecinosBettingType}
+          onBettingTypeChange={onVecinosBettingTypeChange}
+        />
       </div>
     );
   }
@@ -174,7 +181,12 @@ export default function BettingPanel({
         {autoSystem === 'VECINOS' && (
           <>
             <div className="border-t border-gray-800" />
-            <VecinosPanel state={vecinosState} />
+            <VecinosPanel
+              state={vecinosState}
+              historicalBlocks={historicalBlocks}
+              bettingType={vecinosBettingType}
+              onBettingTypeChange={onVecinosBettingTypeChange}
+            />
           </>
         )}
 

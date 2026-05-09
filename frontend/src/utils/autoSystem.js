@@ -8,6 +8,7 @@ import { computeJacoboState, evaluateJacoboOpportunity }         from './jacobo'
 import { computeBettingState }                                   from './roulette';
 import { computeVecinosState, findHotZone, ANALYSIS_WINDOW as VECINOS_WIN } from './vecinos';
 import { computeZonePersistence } from './vecinosAnalytics';
+import { computeConvergentZone, getConvergenceScoreBonus } from './vecinosHistory';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 export const MIN_SCORE_TO_BET   = 30;
@@ -139,8 +140,8 @@ function scoreJacoboSystem(spins) {
   return { score, uniqueNumbers: uniqueNums, maxCount, reason };
 }
 
-// ─── D) Score Vecinos (persistencia-aware) ────────────────────────────────────
-function scoreVecinosSystem(spins) {
+// ─── D) Score Vecinos (persistencia-aware + convergencia histórica) ───────────
+function scoreVecinosSystem(spins, historicalBlocks = null) {
   if (spins.length < VECINOS_WIN) {
     return { score: 0, reason: 'Vecinos: datos insuficientes', zScore: 0 };
   }
@@ -156,9 +157,20 @@ function scoreVecinosSystem(spins) {
 
   const { score: pers } = computeZonePersistence(spins, zone.numbers);
   const persistBonus = Math.round(pers * 20);
-  const score = Math.max(0, Math.min(99, base + persistBonus));
-  const reason = `Zona z=${z.toFixed(1)} pers=${(pers * 100).toFixed(0)}% (${zone.hits}/${VECINOS_WIN} hits · centro ${zone.center})`;
-  return { score, zScore: z, persistence: pers, hits: zone.hits, center: zone.center, reason };
+
+  // Bonus/penalización por convergencia histórica (Fase 3)
+  let convergenceBonus = 0;
+  let convergenceState = 'LOCAL';
+  if (historicalBlocks && historicalBlocks.length > 0) {
+    const conv = computeConvergentZone(spins, historicalBlocks);
+    convergenceState  = conv.convergenceState;
+    convergenceBonus  = getConvergenceScoreBonus(convergenceState);
+  }
+
+  const score  = Math.max(0, Math.min(99, base + persistBonus + convergenceBonus));
+  const convTag = convergenceState === 'CONVERGENTE' ? ' ✓hist' : convergenceState === 'DIVERGENTE' ? ' ⚠div' : '';
+  const reason = `Zona z=${z.toFixed(1)} pers=${(pers * 100).toFixed(0)}%${convTag} (${zone.hits}/${VECINOS_WIN} hits · centro ${zone.center})`;
+  return { score, zScore: z, persistence: pers, hits: zone.hits, center: zone.center, convergenceState, reason };
 }
 
 // ─── Risk penalty: penalizar sistemas con ciclos perdidos ─────────────────────
@@ -172,7 +184,7 @@ function getRiskPenalty(state) {
 }
 
 // ─── Motor principal ──────────────────────────────────────────────────────────
-export function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedSystem = null) {
+export function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedSystem = null, historicalBlocks = null) {
   if (!spins || spins.length === 0) {
     return { system: null, confidence: 0, reason: 'Sin datos', scoreBreakdown: null, locked: false, lockReleased: false };
   }
@@ -270,7 +282,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
   const mScore = scoreMirrorSystem(spins);
   const sScore = scoreSectorsSystem(spins);
   const jScore = scoreJacoboSystem(spins);
-  const vScore = scoreVecinosSystem(spins);
+  const vScore = scoreVecinosSystem(spins, historicalBlocks);
 
   // Penalización por riesgo
   const bestMirrorState = Object.values(mirrorStates)

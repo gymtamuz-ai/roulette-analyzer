@@ -7,10 +7,10 @@ const { computeJacoboState, calculateJacoboBetResult } = require('../utils/jacob
 const { computeMirrorState, calculateMirrorBetResult } = require('../utils/mirror');
 const { computeBestSystem }                            = require('../utils/autoSystem');
 const { computeHotNumbers }                            = require('../utils/hotNumbers');
-const { computeVecinosState, calculateVecinosBetResult } = require('../utils/vecinos');
+const { computeVecinosState, calculateVecinosBetResult, calculateVecinosFlatResult } = require('../utils/vecinos');
 
 // ─── Compute bet result for any mode ──────────────────────────────────────────
-function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color', lockedSystem = null) {
+function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color', lockedSystem = null, vecinosBettingType = 'progressive') {
   if (bettingMode === 'jacobo') {
     const state = computeJacoboState(previousSpins);
     return calculateJacoboBetResult(state, newSpinCls.number);
@@ -21,6 +21,7 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
   }
   if (bettingMode === 'vecinos') {
     const state = computeVecinosState(previousSpins);
+    if (vecinosBettingType === 'flat') return calculateVecinosFlatResult(state, newSpinCls.number);
     return calculateVecinosBetResult(state, newSpinCls.number);
   }
   if (bettingMode === 'auto') {
@@ -36,6 +37,7 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
     }
     if (auto.system === 'VECINOS') {
       const state = computeVecinosState(previousSpins);
+      if (vecinosBettingType === 'flat') return calculateVecinosFlatResult(state, newSpinCls.number);
       return calculateVecinosBetResult(state, newSpinCls.number);
     }
     // SECTORES — AUTO MODE siempre usa A4, nunca A3
@@ -68,7 +70,7 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  let { sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color', lockedSystem = null } = req.body;
+  let { sessionId, number, passTarget = 2, systemType = null, bettingMode = 'sectors', mirrorMode = 'color', lockedSystem = null, vecinosBettingType = 'progressive' } = req.body;
   // Safety: A3 was removed; remap any legacy A3 reference to A4
   if (systemType === 'A3') systemType = 'A4';
   if (lockedSystem === 'A3') lockedSystem = 'A4';
@@ -109,7 +111,7 @@ router.post('/', async (req, res) => {
     );
 
     // Calculate and persist bet result using the active betting mode
-    let betResult = computeActiveBetResult(previousSpins, cls, passTarget, systemType, bettingMode, mirrorMode, lockedSystem);
+    let betResult = computeActiveBetResult(previousSpins, cls, passTarget, systemType, bettingMode, mirrorMode, lockedSystem, vecinosBettingType);
     if (betResult) {
       // Get current running balance for this session
       const balRes = await client.query(
