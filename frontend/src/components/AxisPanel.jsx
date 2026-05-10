@@ -129,6 +129,7 @@ export default function AxisPanel({ state }) {
   const {
     status, triggeredH, triggeredV, aceNumber,
     betNumbers, spinsRemaining, sectorStats, debugLog,
+    cyclesWon = 0, cyclesAborted = 0,
   } = state;
 
   const isActive = spinsRemaining > 0;
@@ -267,6 +268,14 @@ export default function AxisPanel({ state }) {
           </div>
         </div>
       </div>
+
+      {/* ── Cycle counters ── */}
+      {(cyclesWon > 0 || cyclesAborted > 0) && (
+        <div className="flex gap-3 text-xs text-gray-500 border-t border-gray-800 pt-2">
+          <span>✅ Ganados: <span className="text-green-400 font-bold">{cyclesWon}</span></span>
+          <span>⛔ Abortados: <span className="text-red-400 font-bold">{cyclesAborted}</span></span>
+        </div>
+      )}
 
       {/* ── Debug log (last 6 entries) ── */}
       {debugLog && debugLog.length > 0 && (

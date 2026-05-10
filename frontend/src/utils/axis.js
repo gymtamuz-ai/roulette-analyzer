@@ -151,6 +151,8 @@ export function computeAxisState(spins) {
   let triggeredV      = null;
   let aceNumber       = null;
   let betNumbers      = [];
+  let cyclesWon       = 0;
+  let cyclesAborted   = 0;
   const debugLog      = [];
   const nonZeroHist   = [];   // non-zero numbers, chronological
 
@@ -201,6 +203,7 @@ export function computeAxisState(spins) {
 
       if (isWin) {
         debugLog.push(`[AXIS] HIT ${num} — ciclo ${status} ganado (spin ${spinNum}/4)`);
+        cyclesWon++;
         spinsRemaining = 0;
         cooldown       = 1;
         status         = 'COOLDOWN';
@@ -212,6 +215,7 @@ export function computeAxisState(spins) {
         spinsRemaining--;
         if (spinsRemaining === 0) {
           debugLog.push(`[AXIS] Ciclo ${status} expirado — 4 spins sin hit`);
+          cyclesAborted++;
           status     = 'IDLE';
           betNumbers = [];
           triggeredH = null;
@@ -274,6 +278,8 @@ export function computeAxisState(spins) {
     betNumbers,
     spinsRemaining,
     spinsUsed:     spinsRemaining > 0 ? 4 - spinsRemaining : 0,
+    cyclesWon,
+    cyclesAborted,
     sectorStats,
     debugLog,
   };
@@ -289,6 +295,7 @@ function _emptyState() {
     status: 'IDLE', isActive: false,
     triggeredH: null, triggeredV: null, aceNumber: null,
     betNumbers: [], spinsRemaining: 0, spinsUsed: 0,
+    cyclesWon: 0, cyclesAborted: 0,
     sectorStats, debugLog: [],
   };
 }

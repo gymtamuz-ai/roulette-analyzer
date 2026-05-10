@@ -110,6 +110,8 @@ function computeAxisState(spins) {
   let triggeredV     = null;
   let aceNumber      = null;
   let betNumbers     = [];
+  let cyclesWon      = 0;
+  let cyclesAborted  = 0;
   const nonZeroHist  = [];
   const hSeen = { 1: null, 2: null, 3: null, 4: null, 5: null, 6: null };
   const vSeen = { 1: null, 2: null, 3: null, 4: null, 5: null, 6: null };
@@ -145,6 +147,7 @@ function computeAxisState(spins) {
     if (spinsRemaining > 0) {
       const isWin = betNumbers.includes(num);
       if (isWin) {
+        cyclesWon++;
         spinsRemaining = 0;
         cooldown       = 1;
         status         = 'COOLDOWN';
@@ -155,6 +158,7 @@ function computeAxisState(spins) {
       } else {
         spinsRemaining--;
         if (spinsRemaining === 0) {
+          cyclesAborted++;
           status     = 'IDLE';
           betNumbers = [];
           triggeredH = null;
@@ -210,6 +214,8 @@ function computeAxisState(spins) {
     betNumbers,
     spinsRemaining,
     spinsUsed:     spinsRemaining > 0 ? 4 - spinsRemaining : 0,
+    cyclesWon,
+    cyclesAborted,
     sectorStats,
   };
 }
