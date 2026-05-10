@@ -8,9 +8,14 @@ const { computeMirrorState, calculateMirrorBetResult } = require('../utils/mirro
 const { computeBestSystem }                            = require('../utils/autoSystem');
 const { computeHotNumbers }                            = require('../utils/hotNumbers');
 const { computeVecinosState, calculateVecinosBetResult, calculateVecinosFlatResult } = require('../utils/vecinos');
+const { computeAxisState, calculateAxisBetResult }                                    = require('../utils/axis');
 
 // ─── Compute bet result for any mode ──────────────────────────────────────────
 function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color', lockedSystem = null, vecinosBettingType = 'progressive') {
+  if (bettingMode === 'axis') {
+    const state = computeAxisState(previousSpins);
+    return calculateAxisBetResult(state, newSpinCls.number);
+  }
   if (bettingMode === 'jacobo') {
     const state = computeJacoboState(previousSpins);
     return calculateJacoboBetResult(state, newSpinCls.number);

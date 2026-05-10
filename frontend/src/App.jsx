@@ -9,6 +9,7 @@ import { computeMirrorState } from './utils/mirror';
 import { computeVecinosState } from './utils/vecinos';
 import { computeBestSystem }  from './utils/autoSystem';
 import { getHotNumbers }       from './utils/hotNumbers';
+import { computeAxisState }    from './utils/axis';
 
 import NumberPad from './components/NumberPad';
 import SpinHistory from './components/SpinHistory';
@@ -83,6 +84,7 @@ export default function App() {
   const jacoboState    = computeJacoboState(spins);
   const vecinosState   = computeVecinosState(spins);
   const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock, historicalBlocks);
+  const axisState       = computeAxisState(spins);
   const hotNumbers      = useMemo(() => getHotNumbers(spins), [spins]);
 
   // In auto mode, use the auto-chosen mirror mode; otherwise user-chosen
@@ -411,6 +413,7 @@ export default function App() {
             historicalBlocks={historicalBlocks}
             vecinosBettingType={vecinosBettingType}
             onVecinosBettingTypeChange={handleVecinosBettingTypeChange}
+            axisState={axisState}
           />
           <PerformancePanel results={results} summary={resultsSummary} />
           {/* Heatmap de cilindro y backtester solo cuando modo VECINOS está activo */}

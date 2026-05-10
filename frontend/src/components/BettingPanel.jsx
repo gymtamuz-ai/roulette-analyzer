@@ -2,6 +2,7 @@ import { getSectorStreets, PRE_ANALYSIS_WINDOW, PROGRESSION_TABLES } from '../ut
 import JacoboPanel   from './JacoboPanel';
 import MirrorPanel   from './MirrorPanel';
 import VecinosPanel  from './VecinosPanel';
+import AxisPanel     from './AxisPanel';
 import AutoModePanel from './AutoModePanel';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -75,6 +76,8 @@ export default function BettingPanel({
   bettingState, passTarget, onPassTargetChange, systemOverride, onSystemOverride,
   // Individual systems
   jacoboState, mirrorState, vecinosState,
+  // AXIS
+  axisState,
   // Auto mode
   autoSystemState,
   // Mode control
@@ -90,7 +93,8 @@ export default function BettingPanel({
       <ModeTab label="⚡ Jacobo"   active={bettingMode === 'jacobo'}  onClick={() => onBettingModeChange('jacobo')}  color="yellow" />
       <ModeTab label="🪞 Espejo"   active={bettingMode === 'mirror'}  onClick={() => onBettingModeChange('mirror')}  color="cyan"   />
       <ModeTab label="🌊 Vecinos"  active={bettingMode === 'vecinos'} onClick={() => onBettingModeChange('vecinos')} color="green"  />
-      <ModeTab label="🤖 Auto"     active={bettingMode === 'auto'}    onClick={() => onBettingModeChange('auto')}    color="orange" />
+      <ModeTab label="🔷 AXIS"    active={bettingMode === 'axis'}    onClick={() => onBettingModeChange('axis')}    color="blue"   />
+      <ModeTab label="🤖 Auto"    active={bettingMode === 'auto'}    onClick={() => onBettingModeChange('auto')}    color="orange" />
     </div>
   );
 
@@ -144,6 +148,19 @@ export default function BettingPanel({
           bettingType={vecinosBettingType}
           onBettingTypeChange={onVecinosBettingTypeChange}
         />
+      </div>
+    );
+  }
+
+  // ── AXIS mode ──
+  if (bettingMode === 'axis') {
+    return (
+      <div className="card flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <span className="card-title mb-0">🎯 Sistema de Apuesta</span>
+        </div>
+        {modeSelector}
+        <AxisPanel state={axisState} />
       </div>
     );
   }
