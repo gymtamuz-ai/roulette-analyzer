@@ -4,6 +4,7 @@ import MirrorPanel   from './MirrorPanel';
 import VecinosPanel  from './VecinosPanel';
 import AxisPanel     from './AxisPanel';
 import AxisProPanel  from './AxisProPanel';
+import EchoPanel     from './EchoPanel';
 import AutoModePanel from './AutoModePanel';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -55,18 +56,20 @@ function BallDot({ state, isCurrent }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 // ─── Mode tab button ──────────────────────────────────────────────────────────
-function ModeTab({ label, active, onClick, color = 'blue' }) {
-  const colors = {
+function ModeTab({ label, active, onClick, color = 'blue', colorsMap }) {
+  const defaultColors = {
     blue:   'bg-blue-700 text-white border-blue-500',
     yellow: 'bg-yellow-700 text-white border-yellow-500',
     cyan:   'bg-cyan-700 text-white border-cyan-500',
     orange: 'bg-orange-700 text-white border-orange-500',
     green:  'bg-green-700 text-white border-green-500',
+    purple: 'bg-purple-700 text-white border-purple-500',
   };
+  const map = colorsMap ?? defaultColors;
   return (
     <button onClick={onClick}
       className={`flex-1 py-1 px-1 text-xs font-bold rounded border transition-all
-        ${active ? colors[color] : 'bg-gray-800 text-gray-500 border-gray-700 hover:text-gray-300'}`}>
+        ${active ? map[color] : 'bg-gray-800 text-gray-500 border-gray-700 hover:text-gray-300'}`}>
       {label}
     </button>
   );
@@ -93,15 +96,25 @@ export default function BettingPanel({
   // VECINOS Fase 3
   historicalBlocks = [], vecinosBettingType = 'progressive', onVecinosBettingTypeChange,
 }) {
+  // color map extended for purple (ECHO)
+  const colors = {
+    blue:   'bg-blue-700 text-white border-blue-500',
+    yellow: 'bg-yellow-700 text-white border-yellow-500',
+    cyan:   'bg-cyan-700 text-white border-cyan-500',
+    orange: 'bg-orange-700 text-white border-orange-500',
+    green:  'bg-green-700 text-white border-green-500',
+    purple: 'bg-purple-700 text-white border-purple-500',
+  };
   // ── Mode selector (always shown, even with no session) ──
   const modeSelector = (
     <div className="flex gap-1 mb-1 flex-wrap">
-      <ModeTab label="🎯 Sectores" active={bettingMode === 'sectors'} onClick={() => onBettingModeChange('sectors')} color="blue"   />
-      <ModeTab label="⚡ Jacobo"   active={bettingMode === 'jacobo'}  onClick={() => onBettingModeChange('jacobo')}  color="yellow" />
-      <ModeTab label="🪞 Espejo"   active={bettingMode === 'mirror'}  onClick={() => onBettingModeChange('mirror')}  color="cyan"   />
-      <ModeTab label="🌊 Vecinos"  active={bettingMode === 'vecinos'} onClick={() => onBettingModeChange('vecinos')} color="green"  />
-      <ModeTab label="🔷 AXIS"    active={bettingMode === 'axis'}    onClick={() => onBettingModeChange('axis')}    color="blue"   />
-      <ModeTab label="🤖 Auto"    active={bettingMode === 'auto'}    onClick={() => onBettingModeChange('auto')}    color="orange" />
+      <ModeTab label="🎯 Sectores" active={bettingMode === 'sectors'} onClick={() => onBettingModeChange('sectors')} color="blue"   colorsMap={colors} />
+      <ModeTab label="⚡ Jacobo"   active={bettingMode === 'jacobo'}  onClick={() => onBettingModeChange('jacobo')}  color="yellow" colorsMap={colors} />
+      <ModeTab label="🪞 Espejo"   active={bettingMode === 'mirror'}  onClick={() => onBettingModeChange('mirror')}  color="cyan"   colorsMap={colors} />
+      <ModeTab label="🌊 Vecinos"  active={bettingMode === 'vecinos'} onClick={() => onBettingModeChange('vecinos')} color="green"  colorsMap={colors} />
+      <ModeTab label="🔷 AXIS"    active={bettingMode === 'axis'}    onClick={() => onBettingModeChange('axis')}    color="blue"   colorsMap={colors} />
+      <ModeTab label="🔁 ECHO"    active={bettingMode === 'echo'}    onClick={() => onBettingModeChange('echo')}    color="purple" colorsMap={colors} />
+      <ModeTab label="🤖 Auto"    active={bettingMode === 'auto'}    onClick={() => onBettingModeChange('auto')}    color="orange" colorsMap={colors} />
     </div>
   );
 
@@ -155,6 +168,19 @@ export default function BettingPanel({
           bettingType={vecinosBettingType}
           onBettingTypeChange={onVecinosBettingTypeChange}
         />
+      </div>
+    );
+  }
+
+  // ── ECHO mode ──
+  if (bettingMode === 'echo') {
+    return (
+      <div className="card flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <span className="card-title mb-0">🎯 Sistema de Apuesta</span>
+        </div>
+        {modeSelector}
+        <EchoPanel spins={spins} />
       </div>
     );
   }
@@ -220,6 +246,13 @@ export default function BettingPanel({
               bettingType={vecinosBettingType}
               onBettingTypeChange={onVecinosBettingTypeChange}
             />
+          </>
+        )}
+
+        {autoSystem === 'ECHO' && (
+          <>
+            <div className="border-t border-gray-800" />
+            <EchoPanel spins={spins} />
           </>
         )}
 

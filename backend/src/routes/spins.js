@@ -10,9 +10,14 @@ const { computeHotNumbers }                            = require('../utils/hotNu
 const { computeVecinosState, calculateVecinosBetResult, calculateVecinosFlatResult } = require('../utils/vecinos');
 const { computeAxisState, calculateAxisBetResult }                                    = require('../utils/axis');
 const { computeProgressionStep, getProgressionEntry }                                 = require('../utils/axisProgression');
+const { computeEchoState, calculateEchoBetResult }                                    = require('../utils/echo');
 
 // ─── Compute bet result for any mode ──────────────────────────────────────────
 function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color', lockedSystem = null, vecinosBettingType = 'progressive', axisProgressionStep = 1) {
+  if (bettingMode === 'echo') {
+    const state = computeEchoState(previousSpins);
+    return calculateEchoBetResult(state, newSpinCls.number);
+  }
   if (bettingMode === 'axis') {
     const state = computeAxisState(previousSpins);
     return calculateAxisBetResult(state, newSpinCls.number, axisProgressionStep);
@@ -49,6 +54,10 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
     if (auto.system === 'AXIS') {
       const state = computeAxisState(previousSpins);
       return calculateAxisBetResult(state, newSpinCls.number, axisProgressionStep);
+    }
+    if (auto.system === 'ECHO') {
+      const state = computeEchoState(previousSpins);
+      return calculateEchoBetResult(state, newSpinCls.number);
     }
     // SECTORES — AUTO MODE siempre usa A4, nunca A3
     const state = computeBettingState(previousSpins, 'A4', parseInt(passTarget));

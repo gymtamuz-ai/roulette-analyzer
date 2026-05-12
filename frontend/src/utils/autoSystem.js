@@ -12,13 +12,14 @@ import { computeConvergentZone, getConvergenceScoreBonus } from './vecinosHistor
 import { computeAxisState }                                from './axis';
 import { scoreAxisSystemV3, computeAxisIntelligence }      from './axisIntelligence';
 import { computeDrawdownProtection }                        from './axisRiskEngine';
+import { computeEchoState, scoreEchoSystem }               from './echo';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 export const MIN_SCORE_TO_BET   = 30;
 export const SECTOR_EVAL_WINDOW = 30;
 export const JACOBO_EVAL_WINDOW = 30;
 const        MIRROR_WIN         = 10;
-const        SYSTEM_PRIORITY    = { ESPEJO: 4, VECINOS: 3, SECTORES: 2, JACOBO: 1, AXIS: 3 };
+const        SYSTEM_PRIORITY    = { ESPEJO: 4, VECINOS: 3, SECTORES: 2, JACOBO: 1, AXIS: 3, ECHO: 3 };
 
 // ─── Internal spin-value helpers ──────────────────────────────────────────────
 function valueForMode(spin, mode) {
@@ -203,6 +204,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
   // AUTO MODE: lock de SECTORES siempre evalúa A4, nunca A3
   const bettingState = computeBettingState(spins, 'A4', passTarget);
   const axisState    = computeAxisState(spins);
+  const echoState    = computeEchoState(spins);
 
   // ── LOCK EXTERNO: sistema elegido previamente → mantener hasta fin de ciclo ──
   if (lockedSystem) {
@@ -226,6 +228,9 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     } else if (ls === 'AXIS') {
       stillCycling = axisState?.isActive ?? false;
       lockReason   = axisState?.isActive ? `spin ${5 - (axisState.spinsRemaining ?? 0)}/4` : '';
+    } else if (ls === 'ECHO') {
+      stillCycling = echoState?.isActive ?? false;
+      lockReason   = echoState?.isActive ? `${echoState.activeNumbers.length} activos · spin ${echoState.cycleSpins}/${36}` : '';
     }
 
     if (stillCycling) {
@@ -285,6 +290,15 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     };
   }
 
+  if (echoState?.isActive) {
+    return {
+      system: 'ECHO', confidence: 65, locked: true, lockReleased: !!lockedSystem,
+      mirrorMode: null,
+      reason: `ECHO ciclo activo · ${echoState.activeNumbers.length} activos · spin ${echoState.cycleSpins}/36`,
+      scoreBreakdown: null,
+    };
+  }
+
   if (bettingState?.active) {
     return {
       system: 'SECTORES', confidence: 65, locked: true, lockReleased: !!lockedSystem,
@@ -307,6 +321,11 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
   const aScore = axisDD.level === 'critical'
     ? { score: 0, reason: `AXIS bloqueado — DD crítico (${axisDD.maxDrawdown} fchs)` }
     : aScoreRaw;
+  // ECHO scoring
+  const eScore = scoreEchoSystem(spins, echoState);
+  // Penalizar ECHO si muchos ciclos abortados sin victorias
+  const echoRiskPenalty = (echoState?.cyclesAborted >= 3 &&
+    echoState?.cyclesAborted > (echoState?.cyclesWon || 0) * 2) ? -25 : 0;
 
   // Penalización por riesgo
   const bestMirrorState = Object.values(mirrorStates)
@@ -323,6 +342,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
   const jAdj = jScore.score + getRiskPenalty(jacoboState);
   const vAdj = vScore.score + getRiskPenalty(vecinosState);
   const aAdj = aScore.score + getRiskPenalty(axisState);
+  const ecAdj = eScore.score + echoRiskPenalty;
 
   const scoreBreakdown = {
     espejo:   Math.max(0, mAdj),
@@ -330,16 +350,18 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     jacobo:   Math.max(0, jAdj),
     vecinos:  Math.max(0, vAdj),
     axis:     Math.max(0, aAdj),
-    _raw: { espejo: mScore.score, sectores: sScore.score, jacobo: jScore.score, vecinos: vScore.score, axis: aScore.score },
+    echo:     Math.max(0, ecAdj),
+    _raw: { espejo: mScore.score, sectores: sScore.score, jacobo: jScore.score, vecinos: vScore.score, axis: aScore.score, echo: eScore.score },
   };
 
   // ── Candidatos con score >= umbral ──
   const candidates = [
-    { system: 'ESPEJO',   score: mAdj, reason: mScore.reason, mirrorMode: mScore.mode },
-    { system: 'SECTORES', score: sAdj, reason: sScore.reason, mirrorMode: null },
-    { system: 'JACOBO',   score: jAdj, reason: jScore.reason, mirrorMode: null },
-    { system: 'VECINOS',  score: vAdj, reason: vScore.reason, mirrorMode: null },
-    { system: 'AXIS',     score: aAdj, reason: aScore.reason, mirrorMode: null },
+    { system: 'ESPEJO',   score: mAdj,  reason: mScore.reason,  mirrorMode: mScore.mode },
+    { system: 'SECTORES', score: sAdj,  reason: sScore.reason,  mirrorMode: null },
+    { system: 'JACOBO',   score: jAdj,  reason: jScore.reason,  mirrorMode: null },
+    { system: 'VECINOS',  score: vAdj,  reason: vScore.reason,  mirrorMode: null },
+    { system: 'AXIS',     score: aAdj,  reason: aScore.reason,  mirrorMode: null },
+    { system: 'ECHO',     score: ecAdj, reason: eScore.reason,  mirrorMode: null },
   ].filter(c => c.score >= MIN_SCORE_TO_BET);
 
   if (candidates.length === 0) {

@@ -12,6 +12,7 @@ import { getHotNumbers }       from './utils/hotNumbers';
 import { computeAxisState }    from './utils/axis';
 import { computeAxisIntelligence } from './utils/axisIntelligence';
 import { runAxisBacktest }    from './utils/axisBacktest';
+import { computeEchoState }   from './utils/echo';
 
 import NumberPad from './components/NumberPad';
 import SpinHistory from './components/SpinHistory';
@@ -95,6 +96,7 @@ export default function App() {
   const jacoboState    = computeJacoboState(spins);
   const vecinosState   = computeVecinosState(spins);
   const axisState       = computeAxisState(spins);
+  const echoState       = useMemo(() => computeEchoState(spins), [spins]);
   const hotNumbers      = useMemo(() => getHotNumbers(spins), [spins]);
 
   // AXIS Phase 3 — intelligence (memoized, heavy computation)
