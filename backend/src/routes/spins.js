@@ -9,12 +9,13 @@ const { computeBestSystem }                            = require('../utils/autoS
 const { computeHotNumbers }                            = require('../utils/hotNumbers');
 const { computeVecinosState, calculateVecinosBetResult, calculateVecinosFlatResult } = require('../utils/vecinos');
 const { computeAxisState, calculateAxisBetResult }                                    = require('../utils/axis');
+const { computeProgressionStep, getProgressionEntry }                                 = require('../utils/axisProgression');
 
 // ─── Compute bet result for any mode ──────────────────────────────────────────
-function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color', lockedSystem = null, vecinosBettingType = 'progressive') {
+function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemType, bettingMode, mirrorMode = 'color', lockedSystem = null, vecinosBettingType = 'progressive', axisProgressionStep = 1) {
   if (bettingMode === 'axis') {
     const state = computeAxisState(previousSpins);
-    return calculateAxisBetResult(state, newSpinCls.number);
+    return calculateAxisBetResult(state, newSpinCls.number, axisProgressionStep);
   }
   if (bettingMode === 'jacobo') {
     const state = computeJacoboState(previousSpins);
@@ -44,6 +45,10 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
       const state = computeVecinosState(previousSpins);
       if (vecinosBettingType === 'flat') return calculateVecinosFlatResult(state, newSpinCls.number);
       return calculateVecinosBetResult(state, newSpinCls.number);
+    }
+    if (auto.system === 'AXIS') {
+      const state = computeAxisState(previousSpins);
+      return calculateAxisBetResult(state, newSpinCls.number, axisProgressionStep);
     }
     // SECTORES — AUTO MODE siempre usa A4, nunca A3
     const state = computeBettingState(previousSpins, 'A4', parseInt(passTarget));
@@ -115,8 +120,24 @@ router.post('/', async (req, res) => {
       [sessionId, tableId, n, cls.color, cls.parity, cls.dozen, cls.col, cls.sector_a3, cls.sector_a4, spinOrder]
     );
 
+    // ── AXIS6Stars progression step ────────────────────────────────────────────
+    // Query previous AXIS results to determine current step before this spin.
+    // Step advances on loss, resets on win, persists across sector switches.
+    let axisProgressionStep = 1;
+    if (bettingMode === 'axis' || bettingMode === 'auto') {
+      try {
+        const prevAxisRes = await client.query(
+          `SELECT result FROM session_results
+           WHERE session_id = $1 AND system_type = 'AXIS'
+           ORDER BY spin_index ASC`,
+          [sessionId]
+        );
+        axisProgressionStep = computeProgressionStep(prevAxisRes.rows);
+      } catch (_) { /* non-fatal — falls back to step 1 (flat) */ }
+    }
+
     // Calculate and persist bet result using the active betting mode
-    let betResult = computeActiveBetResult(previousSpins, cls, passTarget, systemType, bettingMode, mirrorMode, lockedSystem, vecinosBettingType);
+    let betResult = computeActiveBetResult(previousSpins, cls, passTarget, systemType, bettingMode, mirrorMode, lockedSystem, vecinosBettingType, axisProgressionStep);
     if (betResult) {
       // Get current running balance for this session
       const balRes = await client.query(
@@ -146,6 +167,54 @@ router.post('/', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    // ── AXIS Memory — upsert when an AXIS cycle ends on this spin ────────────
+    if (bettingMode === 'axis' || true) {
+      // Compare state before and after to detect cycle end
+      try {
+        const stateBefore = computeAxisState(previousSpins);
+        if (stateBefore.isActive && stateBefore.spinsRemaining > 0) {
+          // Build the fake spin object the engine expects
+          const spinForEngine = { number: n, ...classifyNumber(n) };
+          const stateAfter  = computeAxisState([...previousSpins, spinForEngine]);
+
+          const cycleJustEnded = !stateAfter.isActive ||
+            stateAfter.cyclesWon > stateBefore.cyclesWon ||
+            stateAfter.cyclesAborted > stateBefore.cyclesAborted;
+
+          if (cycleJustEnded) {
+            const isWin = stateAfter.cyclesWon > stateBefore.cyclesWon;
+
+            // Determine sector type and id from state BEFORE (that's what was active)
+            let sType, sId;
+            if (stateBefore.status === 'TRIGGERED_ECLIPSE') {
+              sType = 'E'; sId = stateBefore.aceNumber;
+            } else if (stateBefore.status === 'TRIGGERED_H') {
+              sType = 'H'; sId = stateBefore.triggeredH;
+            } else if (stateBefore.status === 'TRIGGERED_V') {
+              sType = 'V'; sId = stateBefore.triggeredV;
+            }
+
+            if (sType && sId != null) {
+              await pool.query(
+                `INSERT INTO axis_memory
+                   (table_id, sector_type, sector_id, hits, wins, aborts, total_cycles, last_seen_at)
+                 VALUES ($1, $2, $3, 1, $4, $5, 1, NOW())
+                 ON CONFLICT (table_id, sector_type, sector_id)
+                 DO UPDATE SET
+                   hits         = axis_memory.hits + 1,
+                   wins         = axis_memory.wins + $4,
+                   aborts       = axis_memory.aborts + $5,
+                   total_cycles = axis_memory.total_cycles + 1,
+                   last_seen_at = NOW(),
+                   updated_at   = NOW()`,
+                [tableId, sType, sId, isWin ? 1 : 0, isWin ? 0 : 1]
+              );
+            }
+          }
+        }
+      } catch (_) { /* non-fatal */ }
+    }
 
     // ── Hot window + table_memory — every 36th spin in the session ──────────
     // spinOrder is 0-based index of the new spin; total spins = spinOrder + 1
@@ -182,7 +251,11 @@ router.post('/', async (req, res) => {
       } catch (_) { /* non-fatal — don't break the response */ }
     }
 
-    res.status(201).json({ ...newSpin, bet_result: betResult });
+    res.status(201).json({
+      ...newSpin,
+      bet_result:              betResult,
+      axis_progression_step:   axisProgressionStep,
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });

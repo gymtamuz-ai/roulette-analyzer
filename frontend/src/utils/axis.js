@@ -304,26 +304,32 @@ function _emptyState() {
 /**
  * Given the state BEFORE the spin and the spin number, return the bet result.
  * Returns null if no active cycle (nothing to bet on).
- * Chips = betNumbers.length (6 for H/V, 4-5 for Eclipse).
- * Win pays 36:1 on the winning chip; others lose.
- * Profit: +35 on winning chip, −chips_on_losers = 36 − total_chips.
+ *
+ * stakePerNumber = chips per number from the AXIS6Stars progression table (default 1 = flat).
+ * With progression, each spin's stake scales with the current step.
+ *
+ * European roulette P&L (stake s per number, n numbers covered):
+ *   Win:  +s × (36 − n)   gross win on winner minus s×(n−1) lost on others
+ *   Loss: −s × n           all chips lost
  */
-export function calculateAxisBetResult(state, spinNumber) {
+export function calculateAxisBetResult(state, spinNumber, stakePerNumber = 1) {
   if (!state || !state.isActive) return null;
-  const isWin = state.betNumbers.includes(spinNumber);
-  const chips = state.betNumbers.length;
+  const isWin    = state.betNumbers.includes(spinNumber);
+  const betCount = state.betNumbers.length;
+  const totalBet = stakePerNumber * betCount;
   return {
-    result:     isWin ? 'win' : 'loss',
-    payout:     isWin ? 36 : 0,
-    profit:     isWin ? 36 - chips : -chips,
-    chips,
-    multiplier: 1,
-    systemType: 'AXIS',
-    betSectors: null,
-    betNumbers: state.betNumbers,
-    axisStatus: state.status,
-    triggeredH: state.triggeredH,
-    triggeredV: state.triggeredV,
-    aceNumber:  state.aceNumber,
+    result:         isWin ? 'win' : 'loss',
+    payout:         isWin ? stakePerNumber * 36 : 0,
+    profit:         isWin ? stakePerNumber * (36 - betCount) : -totalBet,
+    chips:          totalBet,          // total chips wagered this spin
+    chipsPerNumber: stakePerNumber,    // stake per number (from progression table)
+    multiplier:     stakePerNumber,
+    systemType:     'AXIS',
+    betSectors:     null,
+    betNumbers:     state.betNumbers,
+    axisStatus:     state.status,
+    triggeredH:     state.triggeredH,
+    triggeredV:     state.triggeredV,
+    aceNumber:      state.aceNumber,
   };
 }

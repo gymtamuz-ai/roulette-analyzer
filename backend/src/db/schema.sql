@@ -79,6 +79,27 @@ CREATE TABLE IF NOT EXISTS hot_windows (
 CREATE INDEX IF NOT EXISTS idx_hot_windows_table   ON hot_windows(table_id);
 CREATE INDEX IF NOT EXISTS idx_hot_windows_session ON hot_windows(session_id);
 
+-- ─── AXIS Memory — histórico acumulado por sector por mesa ──────────────────
+-- Una fila por (table_id, sector_type, sector_id).
+-- sector_type: 'H' (horizontal), 'V' (vertical), 'E' (eclipse/ace).
+-- sector_id:   1-6 para H/V; número ace para E.
+-- total_cycles = wins + aborts (upserted al terminar cada ciclo de apuesta).
+CREATE TABLE IF NOT EXISTS axis_memory (
+  id           SERIAL PRIMARY KEY,
+  table_id     INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+  sector_type  VARCHAR(1) NOT NULL CHECK (sector_type IN ('H','V','E')),
+  sector_id    INTEGER NOT NULL,
+  hits         INTEGER NOT NULL DEFAULT 0,
+  wins         INTEGER NOT NULL DEFAULT 0,
+  aborts       INTEGER NOT NULL DEFAULT 0,
+  total_cycles INTEGER NOT NULL DEFAULT 0,
+  last_seen_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(table_id, sector_type, sector_id)
+);
+CREATE INDEX IF NOT EXISTS idx_axis_memory_table ON axis_memory(table_id);
+
 -- ─── Migrations (idempotent) ───────────────────────────────────────────────────
 DO $$ BEGIN
   ALTER TABLE session_results ALTER COLUMN system_type TYPE VARCHAR(20);

@@ -9,13 +9,16 @@ import { computeBettingState }                                   from './roulett
 import { computeVecinosState, findHotZone, ANALYSIS_WINDOW as VECINOS_WIN } from './vecinos';
 import { computeZonePersistence } from './vecinosAnalytics';
 import { computeConvergentZone, getConvergenceScoreBonus } from './vecinosHistory';
+import { computeAxisState }                                from './axis';
+import { scoreAxisSystemV3, computeAxisIntelligence }      from './axisIntelligence';
+import { computeDrawdownProtection }                        from './axisRiskEngine';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 export const MIN_SCORE_TO_BET   = 30;
 export const SECTOR_EVAL_WINDOW = 30;
 export const JACOBO_EVAL_WINDOW = 30;
 const        MIRROR_WIN         = 10;
-const        SYSTEM_PRIORITY    = { ESPEJO: 4, VECINOS: 3, SECTORES: 2, JACOBO: 1 };
+const        SYSTEM_PRIORITY    = { ESPEJO: 4, VECINOS: 3, SECTORES: 2, JACOBO: 1, AXIS: 3 };
 
 // ─── Internal spin-value helpers ──────────────────────────────────────────────
 function valueForMode(spin, mode) {
@@ -184,7 +187,7 @@ function getRiskPenalty(state) {
 }
 
 // ─── Motor principal ──────────────────────────────────────────────────────────
-export function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedSystem = null, historicalBlocks = null) {
+export function computeBestSystem(spins, passTarget = 2, systemOverride = null, lockedSystem = null, historicalBlocks = null, axisMemoryRows = null, axisIntelligenceData = null) {
   if (!spins || spins.length === 0) {
     return { system: null, confidence: 0, reason: 'Sin datos', scoreBreakdown: null, locked: false, lockReleased: false };
   }
@@ -199,6 +202,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
   const vecinosState = computeVecinosState(spins);
   // AUTO MODE: lock de SECTORES siempre evalúa A4, nunca A3
   const bettingState = computeBettingState(spins, 'A4', passTarget);
+  const axisState    = computeAxisState(spins);
 
   // ── LOCK EXTERNO: sistema elegido previamente → mantener hasta fin de ciclo ──
   if (lockedSystem) {
@@ -219,6 +223,9 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     } else if (ls === 'SECTORES') {
       stillCycling = bettingState?.active ?? false;
       lockReason   = bettingState?.active ? `bola ${bettingState.currentBall}/${bettingState.totalBalls}` : '';
+    } else if (ls === 'AXIS') {
+      stillCycling = axisState?.isActive ?? false;
+      lockReason   = axisState?.isActive ? `spin ${5 - (axisState.spinsRemaining ?? 0)}/4` : '';
     }
 
     if (stillCycling) {
@@ -269,6 +276,15 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     };
   }
 
+  if (axisState?.isActive) {
+    return {
+      system: 'AXIS', confidence: 70, locked: true, lockReleased: !!lockedSystem,
+      mirrorMode: null,
+      reason: `AXIS ciclo activo · spin ${5 - (axisState.spinsRemaining ?? 0)}/4`,
+      scoreBreakdown: null,
+    };
+  }
+
   if (bettingState?.active) {
     return {
       system: 'SECTORES', confidence: 65, locked: true, lockReleased: !!lockedSystem,
@@ -283,6 +299,14 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
   const sScore = scoreSectorsSystem(spins);
   const jScore = scoreJacoboSystem(spins);
   const vScore = scoreVecinosSystem(spins, historicalBlocks);
+  // AXIS Phase 4: usa intelligence + drawdown protection gate
+  const axisAnalytics   = axisIntelligenceData?.sessionAnalytics ?? null;
+  const axisDD          = computeDrawdownProtection(axisAnalytics);
+  const aScoreRaw       = scoreAxisSystemV3(spins, axisState, axisMemoryRows ?? [], axisIntelligenceData);
+  // Si DD crítico, bloquear AXIS en AUTO completamente
+  const aScore = axisDD.level === 'critical'
+    ? { score: 0, reason: `AXIS bloqueado — DD crítico (${axisDD.maxDrawdown} fchs)` }
+    : aScoreRaw;
 
   // Penalización por riesgo
   const bestMirrorState = Object.values(mirrorStates)
@@ -298,13 +322,15 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
   );
   const jAdj = jScore.score + getRiskPenalty(jacoboState);
   const vAdj = vScore.score + getRiskPenalty(vecinosState);
+  const aAdj = aScore.score + getRiskPenalty(axisState);
 
   const scoreBreakdown = {
     espejo:   Math.max(0, mAdj),
     sectores: Math.max(0, sAdj),
     jacobo:   Math.max(0, jAdj),
     vecinos:  Math.max(0, vAdj),
-    _raw: { espejo: mScore.score, sectores: sScore.score, jacobo: jScore.score, vecinos: vScore.score },
+    axis:     Math.max(0, aAdj),
+    _raw: { espejo: mScore.score, sectores: sScore.score, jacobo: jScore.score, vecinos: vScore.score, axis: aScore.score },
   };
 
   // ── Candidatos con score >= umbral ──
@@ -313,6 +339,7 @@ export function computeBestSystem(spins, passTarget = 2, systemOverride = null, 
     { system: 'SECTORES', score: sAdj, reason: sScore.reason, mirrorMode: null },
     { system: 'JACOBO',   score: jAdj, reason: jScore.reason, mirrorMode: null },
     { system: 'VECINOS',  score: vAdj, reason: vScore.reason, mirrorMode: null },
+    { system: 'AXIS',     score: aAdj, reason: aScore.reason, mirrorMode: null },
   ].filter(c => c.score >= MIN_SCORE_TO_BET);
 
   if (candidates.length === 0) {

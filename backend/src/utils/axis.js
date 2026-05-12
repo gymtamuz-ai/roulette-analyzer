@@ -234,18 +234,28 @@ function _emptyState() {
 }
 
 // ─── Bet result ───────────────────────────────────────────────────────────────
-function calculateAxisBetResult(state, spinNumber) {
+/**
+ * stakePerNumber = chips per number from the AXIS6Stars progression table.
+ * Default 1 = flat betting (backward compatible).
+ *
+ * European roulette P&L (stake s per number, n numbers covered):
+ *   Win:  +s × (36 − n)
+ *   Loss: −s × n
+ */
+function calculateAxisBetResult(state, spinNumber, stakePerNumber = 1) {
   if (!state || !state.isActive) return null;
-  const isWin = state.betNumbers.includes(spinNumber);
-  const chips = state.betNumbers.length;
+  const isWin    = state.betNumbers.includes(spinNumber);
+  const betCount = state.betNumbers.length;
+  const totalBet = stakePerNumber * betCount;
   return {
-    result:     isWin ? 'win' : 'loss',
-    payout:     isWin ? 36 : 0,
-    profit:     isWin ? 36 - chips : -chips,
-    chips,
-    multiplier: 1,
-    systemType: 'AXIS',
-    betSectors: null,
+    result:         isWin ? 'win' : 'loss',
+    payout:         isWin ? stakePerNumber * 36 : 0,
+    profit:         isWin ? stakePerNumber * (36 - betCount) : -totalBet,
+    chips:          totalBet,
+    chipsPerNumber: stakePerNumber,
+    multiplier:     stakePerNumber,
+    systemType:     'AXIS',
+    betSectors:     null,
   };
 }
 

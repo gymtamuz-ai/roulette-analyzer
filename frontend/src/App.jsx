@@ -10,6 +10,8 @@ import { computeVecinosState } from './utils/vecinos';
 import { computeBestSystem }  from './utils/autoSystem';
 import { getHotNumbers }       from './utils/hotNumbers';
 import { computeAxisState }    from './utils/axis';
+import { computeAxisIntelligence } from './utils/axisIntelligence';
+import { runAxisBacktest }    from './utils/axisBacktest';
 
 import NumberPad from './components/NumberPad';
 import SpinHistory from './components/SpinHistory';
@@ -32,6 +34,7 @@ const LS_TABLE               = 'roulette_table';
 const LS_BETTING_MODE        = 'roulette_betting_mode';
 const LS_MIRROR_MODE         = 'roulette_mirror_mode';
 const LS_VECINOS_BETTING_TYPE = 'roulette_vecinos_betting_type';
+const LS_AXIS_BANKROLL_MODE  = 'roulette_axis_bankroll_mode';
 
 function enrichSpin(s) {
   const cls = classifyNumber(s.number);
@@ -53,6 +56,8 @@ export default function App() {
   const [mirrorMode,  setMirrorMode]                = useState(() => localStorage.getItem(LS_MIRROR_MODE)  || 'color');
   const [vecinosBettingType, setVecinosBettingType] = useState(() => localStorage.getItem(LS_VECINOS_BETTING_TYPE) || 'progressive');
   const [historicalBlocks, setHistoricalBlocks]     = useState([]);
+  const [axisMemory, setAxisMemory]                 = useState([]);
+  const [bankrollMode, setBankrollMode]             = useState(() => localStorage.getItem(LS_AXIS_BANKROLL_MODE) || 'flat');
   const [error, setError]                           = useState('');
   const [strategyLock, setStrategyLock]             = useState(null);
   const [showImport, setShowImport]                 = useState(false);
@@ -76,6 +81,12 @@ export default function App() {
     localStorage.setItem(LS_VECINOS_BETTING_TYPE, type);
   }, []);
 
+  // Persist bankrollMode (AXIS Phase 4)
+  const handleBankrollModeChange = useCallback((mode) => {
+    setBankrollMode(mode);
+    localStorage.setItem(LS_AXIS_BANKROLL_MODE, mode);
+  }, []);
+
   // ─── Derived state (zero-latency, computed locally) ───────────────────────
   const frequencies    = calculateFrequencies(spins);
   const allDelays      = calculateAllDelays(spins);
@@ -83,9 +94,21 @@ export default function App() {
   const bettingState   = computeBettingState(spins, systemOverride, passTarget);
   const jacoboState    = computeJacoboState(spins);
   const vecinosState   = computeVecinosState(spins);
-  const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock, historicalBlocks);
+  const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock, historicalBlocks, axisMemory, axisIntelligence);
   const axisState       = computeAxisState(spins);
   const hotNumbers      = useMemo(() => getHotNumbers(spins), [spins]);
+
+  // AXIS Phase 3 — intelligence (memoized, heavy computation)
+  const mirrorStateForAxis = computeMirrorState(spins, effectiveMirrorMode);
+  const axisIntelligence   = useMemo(() => computeAxisIntelligence(
+    spins, axisState, axisMemory, {
+      vecinosState,
+      hotNumbers,
+      mirrorState: mirrorStateForAxis,
+      results,
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [spins.length, axisState?.status, axisState?.spinsRemaining, axisMemory, results.length]);
 
   // In auto mode, use the auto-chosen mirror mode; otherwise user-chosen
   const effectiveMirrorMode = (bettingMode === 'auto' && autoSystemState?.mirrorMode)
@@ -118,6 +141,14 @@ export default function App() {
     api.getTableMemoryBlocks(table.id)
       .then(data => setHistoricalBlocks(data.blocks ?? []))
       .catch(() => setHistoricalBlocks([]));  // graceful fallback
+  }, [table?.id]);
+
+  // ─── Fetch AXIS memory whenever table changes ──────────────────────────────
+  useEffect(() => {
+    if (!table?.id) { setAxisMemory([]); return; }
+    api.getAxisMemory(table.id)
+      .then(rows => setAxisMemory(rows ?? []))
+      .catch(() => setAxisMemory([]));  // graceful fallback — new tables have no rows
   }, [table?.id]);
 
   // ─── Load spins + results whenever session changes ────────────────────────
@@ -183,6 +214,13 @@ export default function App() {
       );
       const { bet_result, ...spin } = response;
       setSpins(prev => [...prev, enrichSpin(spin)]);
+
+      // Refresh AXIS memory if a cycle just ended (async, non-blocking)
+      if (bet_result?.systemType === 'AXIS' && table?.id) {
+        api.getAxisMemory(table.id)
+          .then(rows => setAxisMemory(rows ?? []))
+          .catch(() => {});
+      }
 
       // Update performance data if a bet was tracked
       if (bet_result) {
@@ -414,6 +452,12 @@ export default function App() {
             vecinosBettingType={vecinosBettingType}
             onVecinosBettingTypeChange={handleVecinosBettingTypeChange}
             axisState={axisState}
+            axisMemory={axisMemory}
+            axisIntelligence={axisIntelligence}
+            spins={spins}
+            results={results}
+            bankrollMode={bankrollMode}
+            onBankrollModeChange={handleBankrollModeChange}
           />
           <PerformancePanel results={results} summary={resultsSummary} />
           {/* Heatmap de cilindro y backtester solo cuando modo VECINOS está activo */}

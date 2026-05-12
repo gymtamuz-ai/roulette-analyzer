@@ -63,6 +63,9 @@ export const api = {
   getTableMemory:       (tableId) => get(`/table-memory/${tableId}`),
   getTableMemoryBlocks: (tableId) => get(`/table-memory/${tableId}/blocks`),
 
+  // AXIS Memory
+  getAxisMemory: (tableId) => get(`/axis-memory/${tableId}`),
+
   // Analysis
   getAnalysis: (sessionId, systemType, passTarget) => {
     let url = `/analysis/session/${sessionId}?passTarget=${passTarget}`;

@@ -3,6 +3,7 @@ import JacoboPanel   from './JacoboPanel';
 import MirrorPanel   from './MirrorPanel';
 import VecinosPanel  from './VecinosPanel';
 import AxisPanel     from './AxisPanel';
+import AxisProPanel  from './AxisProPanel';
 import AutoModePanel from './AutoModePanel';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -78,6 +79,12 @@ export default function BettingPanel({
   jacoboState, mirrorState, vecinosState,
   // AXIS
   axisState,
+  axisMemory = [],
+  axisIntelligence = null,
+  spins = [],
+  results = [],
+  bankrollMode = 'flat',
+  onBankrollModeChange,
   // Auto mode
   autoSystemState,
   // Mode control
@@ -160,7 +167,16 @@ export default function BettingPanel({
           <span className="card-title mb-0">🎯 Sistema de Apuesta</span>
         </div>
         {modeSelector}
-        <AxisPanel state={axisState} />
+        <AxisPanel state={axisState} memoryRows={axisMemory} intelligence={axisIntelligence} spins={spins} results={results} />
+        <AxisProPanel
+          axisState={axisState}
+          intelligence={axisIntelligence}
+          memoryRows={axisMemory}
+          results={results}
+          spins={spins}
+          bankrollMode={bankrollMode}
+          onBankrollModeChange={onBankrollModeChange}
+        />
       </div>
     );
   }
