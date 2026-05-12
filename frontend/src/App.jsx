@@ -94,12 +94,12 @@ export default function App() {
   const bettingState   = computeBettingState(spins, systemOverride, passTarget);
   const jacoboState    = computeJacoboState(spins);
   const vecinosState   = computeVecinosState(spins);
-  const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock, historicalBlocks, axisMemory, axisIntelligence);
   const axisState       = computeAxisState(spins);
   const hotNumbers      = useMemo(() => getHotNumbers(spins), [spins]);
 
   // AXIS Phase 3 — intelligence (memoized, heavy computation)
-  const mirrorStateForAxis = computeMirrorState(spins, effectiveMirrorMode);
+  // Use mirrorMode directly here to avoid a circular dependency with autoSystemState
+  const mirrorStateForAxis = computeMirrorState(spins, mirrorMode);
   const axisIntelligence   = useMemo(() => computeAxisIntelligence(
     spins, axisState, axisMemory, {
       vecinosState,
@@ -109,6 +109,9 @@ export default function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ), [spins.length, axisState?.status, axisState?.spinsRemaining, axisMemory, results.length]);
+
+  // autoSystemState needs axisIntelligence, so it must come after
+  const autoSystemState = computeBestSystem(spins, passTarget, systemOverride, strategyLock, historicalBlocks, axisMemory, axisIntelligence);
 
   // In auto mode, use the auto-chosen mirror mode; otherwise user-chosen
   const effectiveMirrorMode = (bettingMode === 'auto' && autoSystemState?.mirrorMode)
