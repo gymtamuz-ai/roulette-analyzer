@@ -30,6 +30,29 @@ const SYSTEM_CFG = {
     text:   'text-green-400',
     bar:    'bg-green-500',
   },
+  AXIS: {
+    label:  '🔷 AXIS',
+    border: 'border-blue-400',
+    bg:     'bg-blue-900/20',
+    text:   'text-blue-300',
+    bar:    'bg-blue-400',
+  },
+  ECHO: {
+    label:  '🔁 ECHO',
+    border: 'border-purple-500',
+    bg:     'bg-purple-900/20',
+    text:   'text-purple-400',
+    bar:    'bg-purple-500',
+  },
+};
+
+// Fallback for any future system not yet in SYSTEM_CFG
+const FALLBACK_CFG = {
+  label: '❓ SISTEMA',
+  border: 'border-gray-500',
+  bg:    'bg-gray-900/20',
+  text:  'text-gray-400',
+  bar:   'bg-gray-500',
 };
 
 const SCORE_ROWS = [
@@ -37,6 +60,8 @@ const SCORE_ROWS = [
   { key: 'sectores', label: '🎯 Sectores', system: 'SECTORES' },
   { key: 'jacobo',   label: '⚡ Jacobo',   system: 'JACOBO'   },
   { key: 'vecinos',  label: '🌊 Vecinos',  system: 'VECINOS'  },
+  { key: 'axis',     label: '🔷 AXIS',     system: 'AXIS'     },
+  { key: 'echo',     label: '🔁 ECHO',     system: 'ECHO'     },
 ];
 
 // ─── Score bar ────────────────────────────────────────────────────────────────
@@ -85,7 +110,7 @@ export default function AutoModePanel({ autoState }) {
   }
 
   const { system, confidence, reason, locked, scoreBreakdown } = autoState;
-  const cfg = system ? SYSTEM_CFG[system] : null;
+  const cfg = system ? (SYSTEM_CFG[system] ?? FALLBACK_CFG) : null;
 
   return (
     <div className="flex flex-col gap-3">
