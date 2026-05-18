@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const { classifyNumber } = require('../utils/roulette');
+const { acquireSessionLock, nextSpinOrder, updateWindowAnalytics, buildCrossSessionQuery } = require('../utils/spinHelpers');
 const { computeBettingState, calculateBetResult }      = require('../utils/betting');
 const { computeJacoboState, calculateJacoboBetResult } = require('../utils/jacobo');
 const { computeMirrorState, calculateMirrorBetResult } = require('../utils/mirror');
@@ -71,17 +72,25 @@ function computeActiveBetResult(previousSpins, newSpinCls, passTarget, systemTyp
 router.get('/', async (req, res) => {
   const { sessionId, tableId, limit = 5000, offset = 0 } = req.query;
   try {
-    const conditions = [];
-    const params = [];
-    if (sessionId) { conditions.push(`session_id = $${params.length + 1}`); params.push(sessionId); }
-    if (tableId) { conditions.push(`table_id = $${params.length + 1}`); params.push(tableId); }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    params.push(parseInt(limit));
-    params.push(parseInt(offset));
-    const { rows } = await pool.query(
-      `SELECT * FROM spins ${where} ORDER BY spin_order ASC LIMIT $${params.length - 1} OFFSET $${params.length}`,
-      params
-    );
+    let rows;
+    if (tableId && !sessionId) {
+      // Cross-session query: use chronological ordering via session started_at
+      const q = buildCrossSessionQuery(parseInt(tableId), parseInt(limit), parseInt(offset));
+      ({ rows } = await pool.query(q));
+    } else {
+      // Single-session or unfiltered: spin_order is reliable within one session
+      const conditions = [];
+      const params = [];
+      if (sessionId) { conditions.push(`session_id = $${params.length + 1}`); params.push(sessionId); }
+      if (tableId)   { conditions.push(`table_id = $${params.length + 1}`);   params.push(tableId);   }
+      const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+      params.push(parseInt(limit));
+      params.push(parseInt(offset));
+      ({ rows } = await pool.query(
+        `SELECT * FROM spins ${where} ORDER BY spin_order ASC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params
+      ));
+    }
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -105,6 +114,10 @@ router.post('/', async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    // ── Advisory lock: serializes concurrent writers for this session ─────────
+    // Lock is released automatically at COMMIT/ROLLBACK.
+    await acquireSessionLock(client, sessionId);
+
     // Get session info
     const sessionRes = await client.query('SELECT table_id FROM sessions WHERE id = $1', [sessionId]);
     if (!sessionRes.rows.length) {
@@ -113,13 +126,15 @@ router.post('/', async (req, res) => {
     }
     const tableId = sessionRes.rows[0].table_id;
 
+    // ── Atomic spin_order: MAX+1 (safe after advisory lock) ───────────────────
+    const spinOrder = await nextSpinOrder(client, sessionId);
+
     // Fetch all PREVIOUS spins to compute betting state BEFORE this spin
     const prevSpinsRes = await client.query(
       'SELECT * FROM spins WHERE session_id = $1 ORDER BY spin_order ASC',
       [sessionId]
     );
     const previousSpins = prevSpinsRes.rows;
-    const spinOrder = previousSpins.length;
 
     // Insert the new spin
     const cls = classifyNumber(n);
@@ -178,7 +193,8 @@ router.post('/', async (req, res) => {
     await client.query('COMMIT');
 
     // ── AXIS Memory — upsert when an AXIS cycle ends on this spin ────────────
-    if (bettingMode === 'axis' || true) {
+    // Only update when AXIS is actually active (axis mode or auto mode that may select AXIS)
+    if (bettingMode === 'axis' || bettingMode === 'auto') {
       // Compare state before and after to detect cycle end
       try {
         const stateBefore = computeAxisState(previousSpins);
@@ -226,37 +242,15 @@ router.post('/', async (req, res) => {
     }
 
     // ── Hot window + table_memory — every 36th spin in the session ──────────
-    // spinOrder is 0-based index of the new spin; total spins = spinOrder + 1
+    // Use the shared idempotent helper (skips already-recorded blocks)
     const totalSpins = spinOrder + 1;
     if (totalSpins % 36 === 0) {
       try {
-        const windowIndex = totalSpins / 36;
-        const last36nums  = [...previousSpins.slice(-35).map(s => s.number), n];
-        const hot         = computeHotNumbers(last36nums);
-
-        // 1. Save the hot_window block
-        await pool.query(
-          `INSERT INTO hot_windows (table_id, session_id, window_index, numbers)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT DO NOTHING`,
-          [tableId, sessionId, windowIndex, JSON.stringify(hot)]
+        const allSpinsRes = await pool.query(
+          'SELECT number FROM spins WHERE session_id = $1 ORDER BY spin_order ASC',
+          [sessionId]
         );
-
-        // 2. Upsert table_memory — incremental, persiste entre sesiones
-        if (hot.length > 0) {
-          const nums   = hot.map(h => h.num);
-          const counts = hot.map(h => h.count);
-          await pool.query(
-            `INSERT INTO table_memory (table_id, number, hits)
-             SELECT $1, num, cnt
-               FROM unnest($2::int[], $3::int[]) AS t(num, cnt)
-             ON CONFLICT (table_id, number)
-             DO UPDATE SET
-               hits       = table_memory.hits + EXCLUDED.hits,
-               updated_at = NOW()`,
-            [tableId, nums, counts]
-          );
-        }
+        await updateWindowAnalytics(pool, sessionId, tableId, allSpinsRes.rows, 'append');
       } catch (_) { /* non-fatal — don't break the response */ }
     }
 
@@ -310,6 +304,10 @@ router.post('/bulk', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // ── Advisory lock: serialize concurrent bulk imports for this session ──────
+    await acquireSessionLock(client, sessionId);
+
     const sessionRes = await client.query('SELECT table_id FROM sessions WHERE id = $1', [sessionId]);
     if (!sessionRes.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Session not found' }); }
     const tableId = sessionRes.rows[0].table_id;
@@ -317,12 +315,27 @@ router.post('/bulk', async (req, res) => {
     let spinsInSession = (await client.query('SELECT * FROM spins WHERE session_id = $1 ORDER BY spin_order ASC', [sessionId])).rows;
     let runningBalance = parseInt((await client.query('SELECT COALESCE(SUM(profit),0)::INTEGER as b FROM session_results WHERE session_id = $1', [sessionId])).rows[0].b);
 
+    // ── Pre-load AXIS progression state for bulk replay ───────────────────────
+    let axisProgressionStep = 1;
+    if (bettingMode === 'axis' || bettingMode === 'auto') {
+      try {
+        const prevAxisRes = await client.query(
+          `SELECT result FROM session_results
+           WHERE session_id = $1 AND system_type = 'AXIS'
+           ORDER BY spin_index ASC`,
+          [sessionId]
+        );
+        axisProgressionStep = computeProgressionStep(prevAxisRes.rows);
+      } catch (_) { /* non-fatal — falls back to step 1 */ }
+    }
+
     const inserted = [];
     for (const n of numbers) {
       const num = parseInt(n);
       if (isNaN(num) || num < 0 || num > 36) continue;
 
       const cls = classifyNumber(num);
+      // spin_order is safe: sequential in-loop counter after advisory lock
       const spinOrder = spinsInSession.length;
 
       const { rows: [spin] } = await client.query(
@@ -331,8 +344,17 @@ router.post('/bulk', async (req, res) => {
         [sessionId, tableId, num, cls.color, cls.parity, cls.dozen, cls.col, cls.sector_a3, cls.sector_a4, spinOrder]
       );
 
-      const betResult = computeActiveBetResult(spinsInSession, cls, passTarget, systemType, bettingMode, mirrorMode);
+      // Full params: include lockedSystem, vecinosBettingType, axisProgressionStep
+      const betResult = computeActiveBetResult(
+        spinsInSession, cls, passTarget, systemType, bettingMode,
+        mirrorMode, lockedSystem, vecinosBettingType, axisProgressionStep
+      );
       if (betResult) {
+        // Advance progression step for next spin
+        if (betResult.systemType === 'AXIS') {
+          if (betResult.result === 'win') axisProgressionStep = 1;
+          else axisProgressionStep = Math.min(axisProgressionStep + 1, 20);
+        }
         runningBalance += betResult.profit;
         await client.query(
           `INSERT INTO session_results
@@ -356,6 +378,16 @@ router.post('/bulk', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    // ── Post-commit: update analytics (best-effort, outside transaction) ──────
+    try {
+      const allSpins = await pool.query(
+        'SELECT number FROM spins WHERE session_id = $1 ORDER BY spin_order ASC',
+        [sessionId]
+      );
+      await updateWindowAnalytics(pool, sessionId, tableId, allSpins.rows, 'append');
+    } catch (_) { /* non-fatal */ }
+
     res.status(201).json({ inserted: inserted.length });
   } catch (err) {
     await client.query('ROLLBACK');

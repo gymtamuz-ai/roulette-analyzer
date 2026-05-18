@@ -84,7 +84,8 @@ router.get('/:tableId', async (req, res) => {
   const minWindow = parseInt(req.query.minWindow || '5');  // arc window size
 
   try {
-    // ── Fetch all spins for this table ──────────────────────────────────────
+    // ── Fetch all spins for this table in correct chronological order ──────────
+    // Cross-session ordering: sessions.started_at ASC → spins.spin_order ASC
     const { rows: spins } = await pool.query(
       `SELECT s.number, s.color, s.parity, s.dozen, s.col,
               s.sector_a3, s.sector_a4, s.spun_at,
@@ -92,7 +93,7 @@ router.get('/:tableId', async (req, res) => {
        FROM spins s
        JOIN sessions sess ON sess.id = s.session_id
        WHERE s.table_id = $1
-       ORDER BY s.spin_order ASC`,
+       ORDER BY sess.started_at ASC, s.spin_order ASC`,
       [tableId]
     );
 
@@ -229,25 +230,61 @@ router.get('/:tableId', async (req, res) => {
     ].sort((a, b) => b.zScore - a.zScore);
 
     // ────────────────────────────────────────────────────────────────────────
-    // 4. COLOR / PARITY / DOZEN ANALYSIS
+    // 4. COLOR / PARITY / DOZEN / COLUMN ANALYSIS
+    //    Uses CORRECT European roulette probabilities per category.
+    //    Previous version used N/3 or N/4 for all categories — WRONG.
+    //
+    //    European roulette (37 numbers, single zero):
+    //      red   : 18/37 ≈ 48.65%   black: 18/37 ≈ 48.65%   green: 1/37 ≈ 2.70%
+    //      odd   : 18/37            even : 18/37             zero : 1/37
+    //      dozens: 12/37 each (zero belongs to no dozen)
+    //      cols  : 12/37 each (zero belongs to no column)
+    //
+    //    Standard error uses binomial σ = √(n·p·(1−p)) — correct for any p.
+    //    Poisson approximation √(np) is only valid for p << 1 (i.e., single numbers).
     // ────────────────────────────────────────────────────────────────────────
     const groupFreq = { color: {}, parity: {}, dozen: {}, col: {} };
     for (const s of spins) {
       for (const key of ['color', 'parity', 'dozen', 'col']) {
         const v = s[key];
-        if (v) groupFreq[key][v] = (groupFreq[key][v] || 0) + 1;
+        if (v != null && v !== '') groupFreq[key][v] = (groupFreq[key][v] || 0) + 1;
       }
     }
 
-    function analyzeGroup(counts, expectedPerCat) {
-      return Object.entries(counts).map(([cat, hits]) => {
-        const z = (hits - expectedPerCat) / Math.sqrt(expectedPerCat);
-        const p = zToPValue(z);
+    // European roulette probability map for each category value
+    const ROULETTE_PROBS = {
+      color:  { red: 18/37, black: 18/37, green: 1/37 },
+      parity: { odd: 18/37, even: 18/37, zero: 1/37 },
+      // dozen/col: zero excluded from these columns (DB stores null for zero)
+      // → reference population is nonZeroN, prob = 12/36 = 1/3 per bucket
+      dozen: null,  // computed dynamically from nonZeroN below
+      col:   null,
+    };
+
+    /**
+     * analyzeGroupWithProbs — statistically correct group analysis
+     * @param {Object} counts       map of category → observed hits
+     * @param {Object|null} probMap map of category → true probability (null = equal priors)
+     * @param {number} totalN       reference population size
+     */
+    function analyzeGroupWithProbs(counts, probMap, totalN) {
+      const categories = Object.keys(counts);
+      const equalProb  = 1 / categories.length;
+
+      return categories.map(cat => {
+        const hits   = counts[cat];
+        const prob   = probMap ? (probMap[cat] ?? equalProb) : equalProb;
+        const expCat = totalN * prob;
+        // Binomial std dev — correct for ANY probability (incl. p close to 0.5)
+        const sigma  = Math.sqrt(totalN * prob * (1 - prob));
+        const z      = sigma > 0 ? (hits - expCat) / sigma : 0;
+        const p      = zToPValue(z);
         return {
-          category:  cat,
+          category:  String(cat),
           hits,
-          expected:  parseFloat(expectedPerCat.toFixed(1)),
-          deviation: parseFloat(((hits - expectedPerCat) / expectedPerCat * 100).toFixed(2)),
+          expected:  parseFloat(expCat.toFixed(1)),
+          prob:      parseFloat((prob * 100).toFixed(2)),  // % theoretical
+          deviation: parseFloat(((hits - expCat) / expCat * 100).toFixed(2)),
           zScore:    parseFloat(z.toFixed(3)),
           pValue:    parseFloat(p.toFixed(4)),
           sig:       sigLabel(p),
@@ -255,10 +292,24 @@ router.get('/:tableId', async (req, res) => {
       }).sort((a, b) => b.zScore - a.zScore);
     }
 
-    const colorAnalysis  = analyzeGroup(groupFreq.color,  N / 3);   // red/black/green
-    const parityAnalysis = analyzeGroup(groupFreq.parity, N / 3);   // odd/even/zero
-    const dozenAnalysis  = analyzeGroup(groupFreq.dozen,  N / 4);   // dozens 1-3 + zero
-    const columnAnalysis = analyzeGroup(groupFreq.col,    N / 4);   // cols 1-3 + zero
+    // Color: 18 red, 18 black, 1 green — reference N = total spins
+    const colorAnalysis = analyzeGroupWithProbs(groupFreq.color, ROULETTE_PROBS.color, N);
+
+    // Parity: 18 odd, 18 even, 1 zero — reference N = total spins
+    const parityAnalysis = analyzeGroupWithProbs(groupFreq.parity, ROULETTE_PROBS.parity, N);
+
+    // Dozen: 12/36 = 1/3 each, zero excluded — reference N = nonZeroN
+    // (DB stores dozen=null for zero, so groupFreq.dozen only has values 1-3)
+    const dozenProbs = Object.fromEntries(
+      Object.keys(groupFreq.dozen).map(k => [k, 12/36])
+    );
+    const dozenAnalysis = analyzeGroupWithProbs(groupFreq.dozen, dozenProbs, nonZeroN);
+
+    // Column: same structure as dozen
+    const colProbs = Object.fromEntries(
+      Object.keys(groupFreq.col).map(k => [k, 12/36])
+    );
+    const columnAnalysis = analyzeGroupWithProbs(groupFreq.col, colProbs, nonZeroN);
 
     // ────────────────────────────────────────────────────────────────────────
     // 5. TEMPORAL BIAS STABILITY
@@ -296,22 +347,53 @@ router.get('/:tableId', async (req, res) => {
     // 6. ECHO REPEAT ANALYSIS
     //    How often do numbers repeat? (base for ECHO strategy)
     // ────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
+    // 6. ECHO REPEAT ANALYSIS — O(n) sliding window (was O(n²))
+    //    For each window size W: tracks what fraction of spins repeat a number
+    //    seen in the previous W spins. Uses a Map as a count-per-number in window.
+    // ────────────────────────────────────────────────────────────────────────
     const WINDOWS = [10, 20, 36, 50, 100];
     const repeatAnalysis = {};
 
     for (const W of WINDOWS) {
+      // windowCounts: number → count of occurrences in current [i-W, i-1] window
+      const windowCounts = new Map();
       let totalRepeats = 0;
       let samples = 0;
-      for (let i = W; i < spins.length; i++) {
-        const window = spins.slice(i - W, i).map(s => s.number);
-        const num = spins[i].number;
-        if (window.includes(num)) totalRepeats++;
-        samples++;
+
+      // Pre-fill window with spins[0..W-1]
+      for (let k = 0; k < W && k < spins.length; k++) {
+        const n = spins[k].number;
+        windowCounts.set(n, (windowCounts.get(n) || 0) + 1);
       }
+
+      // For each spin at index i (starting at W), check if it's in [i-W, i-1]
+      for (let i = W; i < spins.length; i++) {
+        const num = spins[i].number;
+        if (windowCounts.has(num)) totalRepeats++;
+        samples++;
+
+        // Slide: remove spins[i-W], add spins[i]
+        const leaving = spins[i - W].number;
+        const prevCnt = windowCounts.get(leaving) || 0;
+        if (prevCnt <= 1) windowCounts.delete(leaving);
+        else windowCounts.set(leaving, prevCnt - 1);
+
+        windowCounts.set(num, (windowCounts.get(num) || 0) + 1);
+      }
+
+      // Expected repeat rate on a fair 37-number wheel:
+      //   P(repeat in W) = 1 − (36/37)(35/37)…((37-W)/37)  [birthday problem]
+      //   Approximation for display: 1 − exp(−W*(W-1)/(2*37))
+      const fairRepeatRate = parseFloat(
+        ((1 - Math.exp(-W * (W - 1) / (2 * 37))) * 100).toFixed(1)
+      );
+
       repeatAnalysis[W] = {
-        window: W,
-        repeatRate: samples > 0 ? parseFloat((totalRepeats / samples * 100).toFixed(1)) : 0,
-        repeats:    totalRepeats,
+        window:        W,
+        repeatRate:    samples > 0 ? parseFloat((totalRepeats / samples * 100).toFixed(1)) : 0,
+        fairRate:      fairRepeatRate,   // expected on a fair wheel
+        repeats:       totalRepeats,
         samples,
       };
     }

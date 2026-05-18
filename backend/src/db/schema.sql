@@ -101,6 +101,60 @@ CREATE TABLE IF NOT EXISTS axis_memory (
 CREATE INDEX IF NOT EXISTS idx_axis_memory_table ON axis_memory(table_id);
 
 -- ─── Migrations (idempotent) ───────────────────────────────────────────────────
+
+-- Fix: UNIQUE constraint on spin ordering within a session (prevents race conditions)
+-- NOTE: If this fails due to existing duplicate data, it's skipped safely.
+DO $$ BEGIN
+  ALTER TABLE spins ADD CONSTRAINT uq_session_spin_order UNIQUE (session_id, spin_order);
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN others THEN NULL;
+END $$;
+
+-- Fix: UNIQUE on hot_windows so ON CONFLICT actually works
+DO $$ BEGIN
+  ALTER TABLE hot_windows
+    ADD CONSTRAINT uq_hot_window UNIQUE (table_id, session_id, window_index);
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN others THEN NULL;
+END $$;
+
+-- Fix: NOT NULL on hot_windows foreign keys (orphaned rows can't accumulate)
+DO $$ BEGIN
+  ALTER TABLE hot_windows ALTER COLUMN table_id SET NOT NULL;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE hot_windows ALTER COLUMN session_id SET NOT NULL;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+-- Fix: UNIQUE on active session per table (prevents two active sessions)
+-- Partial index: only one active=true row per table_id
+DO $$ BEGIN
+  CREATE UNIQUE INDEX uq_one_active_session
+    ON sessions (table_id)
+    WHERE is_active = true;
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN others THEN NULL;
+END $$;
+
+-- Fix: composite index for AXIS progression step queries (session_id + system_type)
+CREATE INDEX IF NOT EXISTS idx_results_session_system
+  ON session_results (session_id, system_type);
+
+-- Fix: composite index for spin_index ordering in results
+CREATE INDEX IF NOT EXISTS idx_results_spin_index
+  ON session_results (session_id, spin_index);
+
+-- Fix: index for efficient cross-session spin ordering per table
+CREATE INDEX IF NOT EXISTS idx_spins_table_session_order
+  ON spins (table_id, session_id, spin_order);
+
+-- Fix: index for temporal ordering when joining with sessions
+CREATE INDEX IF NOT EXISTS idx_sessions_table_started
+  ON sessions (table_id, started_at);
+
 DO $$ BEGIN
   ALTER TABLE session_results ALTER COLUMN system_type TYPE VARCHAR(20);
 EXCEPTION WHEN others THEN NULL;

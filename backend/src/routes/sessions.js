@@ -22,16 +22,25 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const { tableId, name = '' } = req.body;
   if (!tableId) return res.status(400).json({ error: 'tableId is required' });
+  const client = await pool.connect();
   try {
-    // Deactivate other active sessions for this table
-    await pool.query('UPDATE sessions SET is_active = false WHERE table_id = $1 AND is_active = true', [tableId]);
-    const { rows } = await pool.query(
+    await client.query('BEGIN');
+    // Atomic: deactivate + insert in single transaction prevents two active sessions
+    await client.query(
+      'UPDATE sessions SET is_active = false, ended_at = NOW() WHERE table_id = $1 AND is_active = true',
+      [tableId]
+    );
+    const { rows } = await client.query(
       'INSERT INTO sessions (table_id, name) VALUES ($1, $2) RETURNING *',
       [tableId, name]
     );
+    await client.query('COMMIT');
     res.status(201).json(rows[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

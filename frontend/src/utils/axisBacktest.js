@@ -85,8 +85,12 @@ export function runAxisBacktest(spins, { maxSpins = MAX_BACKTEST_SPINS } = {}) {
   let   maxDrawdown = 0;
   const sectorStats = {};
 
-  // ── Session-level progression (persists across sector/trigger switches) ──────
-  let progressionStep = 1;
+  // ── Series-level progression ──────────────────────────────────────────────────
+  // The progression step resets to 1 when the ACTIVE SECTOR changes.
+  // This matches real play: a new trigger means a fresh series entry.
+  // Step only carries over within a continuous series on the SAME sector trigger.
+  let progressionStep  = 1;
+  let lastSectorKey    = null;  // tracks which sector is currently active
 
   // ── Series lifecycle (correct Ganados / Abortados) ───────────────────────────
   // RECOVERED: any win at any step         → increment recoveredSeries, reset step
@@ -98,11 +102,26 @@ export function runAxisBacktest(spins, { maxSpins = MAX_BACKTEST_SPINS } = {}) {
   for (let i = 1; i < window.length; i++) {
     const history = window.slice(0, i);
     const state   = computeAxisState(history);
-    if (!state.isActive) continue;
+    if (!state.isActive) {
+      // No active trigger — reset sector tracking
+      lastSectorKey = null;
+      continue;
+    }
 
     const raw = window[i];
     const num = typeof raw === 'object' ? (raw.number ?? 0) : +raw;
     if (num === 0) continue;
+
+    // Determine current sector key for this trigger
+    const currentSectorKey = state.status === 'TRIGGERED_ECLIPSE' ? `E${state.aceNumber}`
+                           : state.status === 'TRIGGERED_H'       ? `H${state.triggeredH}`
+                           : `V${state.triggeredV}`;
+
+    // Reset progression when sector changes (new trigger = new series entry)
+    if (currentSectorKey !== lastSectorKey) {
+      progressionStep = 1;
+      lastSectorKey   = currentSectorKey;
+    }
 
     const isWin          = state.betNumbers.includes(num);
     const betCount       = state.betNumbers.length;
@@ -132,9 +151,7 @@ export function runAxisBacktest(spins, { maxSpins = MAX_BACKTEST_SPINS } = {}) {
     const dd = peak - balance;
     if (dd > maxDrawdown) maxDrawdown = dd;
 
-    const sKey = state.status === 'TRIGGERED_ECLIPSE' ? `E${state.aceNumber}`
-               : state.status === 'TRIGGERED_H'       ? `H${state.triggeredH}`
-               : `V${state.triggeredV}`;
+    const sKey = currentSectorKey;
 
     if (!sectorStats[sKey]) sectorStats[sKey] = emptySectorStat();
     const ss = sectorStats[sKey];

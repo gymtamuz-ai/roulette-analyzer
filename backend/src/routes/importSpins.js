@@ -1,17 +1,23 @@
 // ─── POST /api/import/:sessionId ─────────────────────────────────────────────
 // Importación masiva de historial para una sesión.
-// Reutiliza exactamente la misma lógica que /spins/bulk.
-// Después recalcula hot_windows + table_memory para todos los bloques de 36.
+//
+// PIPELINE UNIFICADO: usa los mismos helpers que spins.js para garantizar:
+//   • spin_order atómico y sin race conditions (advisory lock)
+//   • hot_windows idempotentes (sin double-counting)
+//   • table_memory consistente con el resto del sistema
+//
+// NOTA: El import NO computa bet_results por diseño — es ingreso de historial raw.
+// Para replay con estrategias, usar POST /api/spins/bulk.
 
-const express     = require('express');
-const router      = express.Router();
-const pool        = require('../db');
-const { classifyNumber }   = require('../utils/roulette');
-const { computeHotNumbers } = require('../utils/hotNumbers');
+const express    = require('express');
+const router     = express.Router();
+const pool       = require('../db');
+const { classifyNumber }          = require('../utils/roulette');
+const { acquireSessionLock, nextSpinOrder, updateWindowAnalytics } = require('../utils/spinHelpers');
 
 // ─── POST /api/import/:sessionId ──────────────────────────────────────────────
 router.post('/:sessionId', async (req, res) => {
-  const sessionId     = parseInt(req.params.sessionId);
+  const sessionId = parseInt(req.params.sessionId);
   const { numbers, replaceExisting = false } = req.body;
 
   if (!Array.isArray(numbers) || numbers.length === 0) {
@@ -29,11 +35,13 @@ router.post('/:sessionId', async (req, res) => {
   }
 
   console.log(`[IMPORT] sessionId=${sessionId} | total=${clean.length} | replaceExisting=${replaceExisting}`);
-  console.log(`[IMPORT] First historical: ${clean[0]}  |  Last historical: ${clean[clean.length - 1]}`);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // ── Advisory lock: serializa imports concurrentes para esta sesión ─────────
+    await acquireSessionLock(client, sessionId);
 
     // Verificar sesión y obtener tableId
     const sessionRes = await client.query(
@@ -49,80 +57,52 @@ router.post('/:sessionId', async (req, res) => {
     if (replaceExisting) {
       await client.query('DELETE FROM session_results WHERE session_id = $1', [sessionId]);
       await client.query('DELETE FROM spins WHERE session_id = $1', [sessionId]);
-      console.log(`[IMPORT] Existing spins deleted for session ${sessionId}`);
+      // IMPORTANTE: también resetear table_memory para la contribución de esta sesión
+      // Lo hacemos eliminando los hot_windows de esta sesión y recalculando al final
+      await client.query('DELETE FROM hot_windows WHERE session_id = $1', [sessionId]);
+      console.log(`[IMPORT] Existing data cleared for session ${sessionId}`);
     }
 
-    // Cargar spins ya existentes en sesión (si se agrega, no reemplaza)
-    let spinsInSession = (
-      await client.query('SELECT * FROM spins WHERE session_id = $1 ORDER BY spin_order ASC', [sessionId])
-    ).rows;
-
     // Insertar en bulk dentro de la transacción
+    // spin_order es secuencial in-loop — seguro con advisory lock
+    const currentCount = parseInt(
+      (await client.query(
+        'SELECT COUNT(*) as c FROM spins WHERE session_id = $1', [sessionId]
+      )).rows[0].c
+    );
+
     const insertedIds = [];
-    for (const num of clean) {
+    for (let i = 0; i < clean.length; i++) {
+      const num      = clean[i];
       const cls      = classifyNumber(num);
-      const spinOrder = spinsInSession.length;
+      const spinOrder = currentCount + i;  // advisory lock garantiza que no hay race
 
       const { rows: [spin] } = await client.query(
-        `INSERT INTO spins (session_id, table_id, number, color, parity, dozen, col, sector_a3, sector_a4, spin_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        `INSERT INTO spins
+           (session_id, table_id, number, color, parity, dozen, col, sector_a3, sector_a4, spin_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING id`,
         [sessionId, tableId, num, cls.color, cls.parity, cls.dozen, cls.col, cls.sector_a3, cls.sector_a4, spinOrder]
       );
-
-      spinsInSession.push(spin);
       insertedIds.push(spin.id);
     }
 
     await client.query('COMMIT');
-    console.log(`[IMPORT] Bulk insert completed — ${insertedIds.length} spins`);
+    console.log(`[IMPORT] ${insertedIds.length} spins inserted for session ${sessionId}`);
 
-    // ── Recalcular hot_windows + table_memory para todos los bloques de 36 ──
-    // (fuera de la transacción para no bloquear; errores no fatales)
+    // ── Post-commit: recalcular analytics (idempotente, sin double-counting) ──
+    // updateWindowAnalytics solo procesa bloques nuevos — no re-cuenta los ya existentes
     try {
-      // Traer todos los spins de la sesión en orden
-      const allSpins = (
-        await pool.query('SELECT * FROM spins WHERE session_id = $1 ORDER BY spin_order ASC', [sessionId])
-      ).rows;
+      const { rows: allSpins } = await pool.query(
+        'SELECT number FROM spins WHERE session_id = $1 ORDER BY spin_order ASC',
+        [sessionId]
+      );
 
-      const totalSpins = allSpins.length;
-      const totalBlocks = Math.floor(totalSpins / 36);
+      const mode = replaceExisting ? 'replace' : 'append';
+      await updateWindowAnalytics(pool, sessionId, tableId, allSpins, mode);
 
-      // Si reemplazamos, limpiar los hot_windows previos de esta sesión
-      if (replaceExisting) {
-        await pool.query('DELETE FROM hot_windows WHERE session_id = $1', [sessionId]);
-      }
-
-      for (let block = 1; block <= totalBlocks; block++) {
-        const slice36 = allSpins.slice((block - 1) * 36, block * 36);
-        const nums36  = slice36.map(s => s.number);
-        const hot     = computeHotNumbers(nums36);
-
-        // Guardar hot_window (ON CONFLICT DO NOTHING: no duplicar si ya existe)
-        await pool.query(
-          `INSERT INTO hot_windows (table_id, session_id, window_index, numbers)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT DO NOTHING`,
-          [tableId, sessionId, block, JSON.stringify(hot)]
-        );
-
-        // Upsert table_memory incremental
-        if (hot.length > 0) {
-          const hotNums   = hot.map(h => h.num);
-          const hotCounts = hot.map(h => h.count);
-          await pool.query(
-            `INSERT INTO table_memory (table_id, number, hits)
-             SELECT $1, num, cnt
-               FROM unnest($2::int[], $3::int[]) AS t(num, cnt)
-             ON CONFLICT (table_id, number)
-             DO UPDATE SET
-               hits       = table_memory.hits + EXCLUDED.hits,
-               updated_at = NOW()`,
-            [tableId, hotNums, hotCounts]
-          );
-        }
-      }
-
-      console.log(`[IMPORT] Analytics recalculated — ${totalBlocks} blocks of 36`);
+      const totalBlocks = Math.floor(allSpins.length / 36);
+      console.log(`[IMPORT] Analytics updated — ${totalBlocks} blocks (mode=${mode})`);
     } catch (analyticsErr) {
       // No fatal — los spins están guardados igual
       console.error('[IMPORT] Analytics warning:', analyticsErr.message);
